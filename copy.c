@@ -60,7 +60,13 @@ usewidthle(Fn *fn, Ref r, int w)
 		switch (u->type) {
 		case UPhi:
 			p = u->u.phi;
-			if (p->visit)
+			/* during gvn, phi nodes may be
+			 * replaced by other temps; in
+			 * this case, the replaced phi
+			 * uses are added to the
+			 * replacement temp uses and
+			 * Phi.to is set to R */
+			if (p->visit || req(p->to, R))
 				continue;
 			p->visit = 1;
 			b = usewidthle(fn, p->to, w);
