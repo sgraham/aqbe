@@ -57,53 +57,57 @@ fillpreds(Fn *f)
 	}
 }
 
-static void
-porec(Blk *b, uint *npo)
-{
-	Blk *s1, *s2;
-
-	if (!b || b->id != -1u)
-		return;
-	b->id = 0; /* marker */
-	s1 = b->s1;
-	s2 = b->s2;
-	if (s1 && s2 && s1->loop > s2->loop) {
-		s1 = b->s2;
-		s2 = b->s1;
-	}
-	porec(s1, npo);
-	porec(s2, npo);
-	b->id = (*npo)++;
+// Recurse through blocks in post-order. The root of the walk will end up with
+// the highest block id. Also count the total number of (reachable) blocks in
+// the function to use for allocating the rpo vector.
+static void post_order_walk_impl(Blk* b, uint* npo) {
+  if (!b || b->id != -1u) {
+    return;
+  }
+  b->id = 0;  // Don't visit again, but id isn't assigned until later below.
+  Blk* s1 = b->s1;
+  Blk* s2 = b->s2;
+  if (s1 && s2 && s1->loop > s2->loop) {  // XXX: what is loop?
+    s1 = b->s2;
+    s2 = b->s1;
+  }
+  post_order_walk_impl(s1, npo);
+  post_order_walk_impl(s2, npo);
+  b->id = (*npo)++;
 }
 
-static void
-fillrpo(Fn *f)
-{
-	Blk *b, **p;
-
-	for (b=f->start; b; b=b->link)
-		b->id = -1u;
-	f->nblk = 0;
-	porec(f->start, &f->nblk);
-	vgrow(&f->rpo, f->nblk);
-	for (p=&f->start; (b=*p);) {
-		if (b->id == -1u) {
-			*p = b->link;
-		} else {
-			b->id = f->nblk-b->id-1;
-			f->rpo[b->id] = b;
-			p = &b->link;
-		}
-	}
+static void fill_rpo_of_function(Fn* f) {
+  // Reset all block ids to -1 to mark as unhandled.
+  for (Blk* b = f->start; b; b = b->link) {
+    b->id = -1u;
+  }
+  f->nblk = 0;
+  post_order_walk_impl(f->start, &f->nblk);
+  vgrow(&f->rpo, f->nblk);
+  for (Blk** p = &f->start, *b = NULL; (b = *p);) {
+    if (b->id == -1u) {
+      // If the block wasn't visited by the post-order walk, then it's dead,
+      // just skip to the next one in the block list.
+      *p = b->link;
+    } else {
+      // Otherwise, invert the id. Latest visited were given the highest ids
+      // during the walk, now the first visited will instead have id (and index)
+      // 0. XXX: Just assign in order during walk? (would have to be +1 biased
+      // to maintain 0 as a marker during walk, but would be clearer than
+      // inverting)
+      b->id = f->nblk - b->id - 1;
+      // Stash the block in order into the rpo vector, and advance.
+      f->rpo[b->id] = b;
+      p = &b->link;
+    }
+  }
 }
 
 /* fill rpo, preds; prune dead blks */
-void
-fillcfg(Fn *f)
-{
-	fillrpo(f);
-	fillpreds(f);
-	fixphis(f);
+void fillcfg(Fn* f) {
+  fill_rpo_of_function(f);
+  fillpreds(f);
+  fixphis(f);
 }
 
 /* for dominators computation, read
