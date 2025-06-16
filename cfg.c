@@ -35,26 +35,26 @@ fixphis(Fn *f)
 	}
 }
 
-static void
-addpred(Blk *bp, Blk *b)
-{
-	vgrow(&b->pred, ++b->npred);
-	b->pred[b->npred-1] = bp;
+static void addpred(Blk* bp, Blk* b) {
+  vgrow(&b->pred, ++b->npred);
+  b->pred[b->npred - 1] = bp;
 }
 
-void
-fillpreds(Fn *f)
-{
-	Blk *b;
-
-	for (b=f->start; b; b=b->link)
-		b->npred = 0;
-	for (b=f->start; b; b=b->link) {
-		if (b->s1)
-			addpred(b, b->s1);
-		if (b->s2 && b->s2 != b->s1)
-			addpred(b, b->s2);
-	}
+// Each block has a vector of predecessor blocks.
+// XXX what are s1/s2?
+// XXX when are s1/s2 filled out? must be during parse
+void fill_preds_of_function(Fn* f) {
+  for (Blk* b = f->start; b; b = b->link) {
+    b->npred = 0;
+  }
+  for (Blk* b = f->start; b; b = b->link) {
+    if (b->s1) {
+      addpred(b, b->s1);
+    }
+    if (b->s2 && b->s2 != b->s1) {
+      addpred(b, b->s2);
+    }
+  }
 }
 
 // Recurse through blocks in post-order. The root of the walk will end up with
@@ -98,7 +98,8 @@ static void fill_rpo_of_function(Fn* f) {
       b->id = f->nblk - b->id - 1;
       // Stash the block in order into the rpo vector, and advance.
       f->rpo[b->id] = b;
-      p = &b->link;
+      p = &b->link;  // XXX investigate why advance is slightly different here
+                     // vs. above
     }
   }
 }
@@ -106,7 +107,7 @@ static void fill_rpo_of_function(Fn* f) {
 /* fill rpo, preds; prune dead blks */
 void fillcfg(Fn* f) {
   fill_rpo_of_function(f);
-  fillpreds(f);
+  fill_preds_of_function(f);
   fixphis(f);
 }
 

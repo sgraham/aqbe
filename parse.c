@@ -813,7 +813,7 @@ typecheck(Fn *fn)
 	Ref r;
 	BSet pb[1], ppb[1];
 
-	fillpreds(fn);
+	fill_preds_of_function(fn);
 	bsinit(pb, fn->nblk);
 	bsinit(ppb, fn->nblk);
 	for (b=fn->start; b; b=b->link) {

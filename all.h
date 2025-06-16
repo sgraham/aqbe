@@ -543,7 +543,7 @@ void elimsb(Fn *);
 
 /* cfg.c */
 Blk *newblk(void);
-void fillpreds(Fn *);
+void fill_preds_of_function(Fn *);
 void fillcfg(Fn *);
 void filldom(Fn *);
 int sdom(Blk *, Blk *);
