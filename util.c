@@ -394,17 +394,20 @@ clsmerge(short *pk, short k)
 	return k1 != k;
 }
 
-int
-phicls(int t, Tmp *tmp)
-{
-	int t1;
-
-	t1 = tmp[t].phi;
-	if (!t1)
-		return t;
-	t1 = phicls(t1, tmp);
-	tmp[t].phi = t1;
-	return t1;
+// |t| is the index of the temporary
+// |tmp| is the vector of all temporaries
+//
+// TODO: I think this is following phi instructions back through a chain of
+// temporaries and returning the outermost that's still a phi. It also has the
+// side-effect of collapsing the ones that it walks through.
+int phicls(int t, Tmp* tmp) {
+  int t1 = tmp[t].phi;
+  if (!t1) {
+    return t;
+  }
+  int t2 = phicls(t1, tmp);
+  tmp[t].phi = t2;
+  return t2;
 }
 
 uint

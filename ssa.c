@@ -34,76 +34,96 @@ adduse(Tmp *tmp, int ty, Blk *b, ...)
 /* fill usage, width, phi, and class information
  * must not change .visit fields
  */
-void
-filluse(Fn *fn)
-{
-	Blk *b;
-	Phi *p;
-	Ins *i;
-	int m, t, tp, w, x;
-	uint a;
-	Tmp *tmp;
+void filluse(Fn* fn) {
+  Tmp* tmp = fn->tmp;
+  // Partial (?) reset of all temporaries. Not reset: name, use, cost, slot,
+  // hint, alias, visit, gcmbid. XXX it seems like most of those are
+  // incidentally not reset (because they're [over]written later presumably),
+  // but the original comment above says .visit has to be maintained. It seems
+  // strange to maintain visit while nuking the rest though?
+  for (int t = Tmp0; t < fn->ntmp; t++) {
+    tmp[t].def = 0;
+    tmp[t].bid = -1u;
+    tmp[t].ndef = 0;
+    tmp[t].nuse = 0;
+    tmp[t].cls = 0;
+    tmp[t].phi = 0;
+    tmp[t].width = WFull;
+    if (tmp[t].use == NULL) {
+      tmp[t].use = vnew(0, sizeof(Use), PFn);
+    }
+  }
+  for (Blk* b = fn->start; b; b = b->link) {
+    for (Phi* p = b->phi; p; p = p->link) {
+      // If the block has phis (incoming) then the location to which the result
+      // of the phi instruction is being stored has to be a temporary. Save the
+      // block where it's defined, and for each argument to the phi instruction,
+      // track the usages (in the Tmp::use vector) of each argument.
+      assert(rtype(p->to) == RTmp);
+      int tp = p->to.val;
+      tmp[tp].bid = b->id;
+      tmp[tp].ndef++;
+      tmp[tp].cls = p->cls;
 
-	tmp = fn->tmp;
-	for (t=Tmp0; t<fn->ntmp; t++) {
-		tmp[t].def = 0;
-		tmp[t].bid = -1u;
-		tmp[t].ndef = 0;
-		tmp[t].nuse = 0;
-		tmp[t].cls = 0;
-		tmp[t].phi = 0;
-		tmp[t].width = WFull;
-		if (tmp[t].use == 0)
-			tmp[t].use = vnew(0, sizeof(Use), PFn);
-	}
-	for (b=fn->start; b; b=b->link) {
-		for (p=b->phi; p; p=p->link) {
-			assert(rtype(p->to) == RTmp);
-			tp = p->to.val;
-			tmp[tp].bid = b->id;
-			tmp[tp].ndef++;
-			tmp[tp].cls = p->cls;
-			tp = phicls(tp, fn->tmp);
-			for (a=0; a<p->narg; a++)
-				if (rtype(p->arg[a]) == RTmp) {
-					t = p->arg[a].val;
-					adduse(&tmp[t], UPhi, b, p);
-					t = phicls(t, fn->tmp);
-					if (t != tp)
-						tmp[t].phi = tp;
-				}
-		}
-		for (i=b->ins; i<&b->ins[b->nins]; i++) {
-			if (!req(i->to, R)) {
-				assert(rtype(i->to) == RTmp);
-				w = WFull;
-				if (isparbh(i->op))
-					w = Wsb + (i->op - Oparsb);
-				if (isload(i->op) && i->op != Oload)
-					w = Wsb + (i->op - Oloadsb);
-				if (isext(i->op))
-					w = Wsb + (i->op - Oextsb);
-				if (iscmp(i->op, &x, &x))
-					w = Wub;
-				if (w == Wsw || w == Wuw)
-				if (i->cls == Kw)
-					w = WFull;
-				t = i->to.val;
-				tmp[t].width = w;
-				tmp[t].def = i;
-				tmp[t].bid = b->id;
-				tmp[t].ndef++;
-				tmp[t].cls = i->cls;
-			}
-			for (m=0; m<2; m++)
-				if (rtype(i->arg[m]) == RTmp) {
-					t = i->arg[m].val;
-					adduse(&tmp[t], UIns, b, i);
-				}
-		}
-		if (rtype(b->jmp.arg) == RTmp)
-			adduse(&tmp[b->jmp.arg.val], UJmp, b);
-	}
+      // This recurses to find the top-most temp that's still a phi. I think it
+      // must be collapsing usages if there's a chain of variables used in phis
+      // so that this one can point directly at the 'original' source of a value
+      // through copies and renamings.
+      tp = phicls(tp, fn->tmp);
+
+      for (uint a = 0; a < p->narg; a++) {
+        if (rtype(p->arg[a]) == RTmp) {
+          int ta = p->arg[a].val;
+          adduse(&tmp[ta], UPhi, b, p);
+          ta = phicls(ta, fn->tmp);
+          if (ta != tp) {
+            // If the argument isn't the output (?) then set the argument's phi
+            // to the main instruction. XXX Not sure about this, or why.
+            tmp[ta].phi = tp;
+          }
+        }
+      }
+    }
+    for (Ins* i = b->ins; i < &b->ins[b->nins]; i++) {
+      if (!req(i->to, R)) {
+        assert(rtype(i->to) == RTmp);
+        int w = WFull;
+        if (isparbh(i->op)) {
+          w = Wsb + (i->op - Oparsb);
+        }
+        if (isload(i->op) && i->op != Oload) {
+          w = Wsb + (i->op - Oloadsb);
+        }
+        if (isext(i->op)) {
+          w = Wsb + (i->op - Oextsb);
+        }
+        int unused;
+        if (iscmp(i->op, &unused, &unused)) {
+          w = Wub;
+        }
+        if (w == Wsw || w == Wuw) {
+          if (i->cls == Kw) {
+            w = WFull;
+          }
+        }
+        int t = i->to.val;
+        tmp[t].width = w;
+        tmp[t].def = i;
+        tmp[t].bid = b->id;
+        tmp[t].ndef++;
+        tmp[t].cls = i->cls;
+      }
+      for (int m = 0; m < 2; m++) {
+        if (rtype(i->arg[m]) == RTmp) {
+          int t = i->arg[m].val;
+          adduse(&tmp[t], UIns, b, i);
+        }
+      }
+    }
+    if (rtype(b->jmp.arg) == RTmp) {
+      adduse(&tmp[b->jmp.arg.val], UJmp, b);
+    }
+  }
 }
 
 static Ref

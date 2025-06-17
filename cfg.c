@@ -15,8 +15,11 @@ newblk(void)
 
 // It looks like this squashes out any dead blocks, but I'm not sure how that
 // can happen right after parse, as I think the phi instruction would fail if
-// the predecessors aren't matched. XXX try to write a test where this is
-// needed.
+// the predecessors aren't matched.
+// XXX try to write a test where this is needed.
+// XXX fillcfg() is used multiple times in the main function processing, so it
+// must be possible to break the invariant elsewhere. There's no test that fails
+// currently without this function though.
 #if 0
 static void fix_phis_of_function(Fn* f) {
   for (Blk* b = f->start; b; b = b->link) {
