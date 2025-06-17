@@ -13,6 +13,11 @@ newblk(void)
 	return b;
 }
 
+// It looks like this squashes out any dead blocks, but I'm not sure how that
+// can happen right after parse, as I think the phi instruction would fail if
+// the predecessors aren't matched. XXX try to write a test where this is
+// needed.
+#if 0
 static void fix_phis_of_function(Fn* f) {
   for (Blk* b = f->start; b; b = b->link) {
     assert(b->id < f->nblk);
@@ -30,6 +35,7 @@ static void fix_phis_of_function(Fn* f) {
     }
   }
 }
+#endif
 
 static void addpred(Blk* bp, Blk* b) {
   vgrow(&b->pred, ++b->npred);
@@ -48,7 +54,7 @@ void fill_preds_of_function(Fn* f) {
     b->npred = 0;
   }
   // For each block in the function, add this block to s1's and (if s1 is
-  // different than s2) to s2's as one of it's predecessors. (i.e. the block
+  // different than s2) to s2's as one of its predecessors. (i.e. the block
   // we're walking is the one being added, we're building a back-list, not
   // building the list for |b| in this loop).
   for (Blk* b = f->start; b; b = b->link) {
@@ -112,7 +118,7 @@ static void fill_rpo_of_function(Fn* f) {
 void fillcfg(Fn* f) {
   fill_rpo_of_function(f);
   fill_preds_of_function(f);
-  fix_phis_of_function(f);
+  //fix_phis_of_function(f);
 }
 
 /* for dominators computation, read
