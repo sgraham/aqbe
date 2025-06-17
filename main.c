@@ -1,7 +1,7 @@
 #include "all.h"
 #include "config.h"
 #include <ctype.h>
-#include <getopt.h>
+#include "getopt.h"
 
 Target T;
 
