@@ -1,3 +1,22 @@
+This is a lightly 'A'nnotated QBE.
+
+I wanted to understand the internals of QBE a little better, but must have some
+sort of learning disability that inhibits me being able to understand the terse
+style that QBE is written in!
+
+It's functionally unmodified, but adds some comments and renames some
+functions/variables that made it easier for me to follow. YMMV, naturally.
+
+It's not intended to be a fork, or aimed at upstreaming, it's more like an
+"internals" document. I don't expect to continually rebase on master, but QBE
+doesn't have high churn, so it shouldn't diverge too quickly, and shouldn't be
+that hard to rebase if desired.
+
+
+Original README follows:
+------------------------
+
+
 QBE - Backend Compiler              http://c9x.me/compile/
 
 doc/    Documentation.
