@@ -41,12 +41,20 @@ static void addpred(Blk* bp, Blk* b) {
 }
 
 // Each block has a vector of predecessor blocks.
-// XXX what are s1/s2?
-// XXX when are s1/s2 filled out? must be during parse
+// s1/s2 for each block is filled out during parse. 's' is maybe "subsequent"?
+// and indicates the edges out of the block.
+// - In the case of fallthrough, s1 will be set to the following block, and s2
+// will be unset.
+// - For an unconditional jump, s1 will be set to the target, s2 will be unset.
+// - For a conditional jump, s1 and s2 will be set to the true and false arms.
 void fill_preds_of_function(Fn* f) {
   for (Blk* b = f->start; b; b = b->link) {
     b->npred = 0;
   }
+  // For each block in the function, add this block to s1's and (if s1 is
+  // different than s2) to s2's as one of it's predecessors. (i.e. the block
+  // we're walking is the one being added, we're building a back-list, not
+  // building the list for |b| in this loop).
   for (Blk* b = f->start; b; b = b->link) {
     if (b->s1) {
       addpred(b, b->s1);
