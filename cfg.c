@@ -1,7 +1,7 @@
 #include "all.h"
 
 Blk *
-newblk()
+newblk(void)
 {
 	static Blk z;
 	Blk *b;
@@ -13,26 +13,22 @@ newblk()
 	return b;
 }
 
-static void
-fixphis(Fn *f)
-{
-	Blk *b;
-	Phi *p;
-	uint n, n0;
-
-	for (b=f->start; b; b=b->link) {
-		assert(b->id < f->nblk);
-		for (p=b->phi; p; p=p->link) {
-			for (n=n0=0; n<p->narg; n++)
-				if (p->blk[n]->id != -1u) {
-					p->blk[n0] = p->blk[n];
-					p->arg[n0] = p->arg[n];
-					n0++;
-				}
-			assert(n0 > 0);
-			p->narg = n0;
-		}
-	}
+static void fix_phis_of_function(Fn* f) {
+  for (Blk* b = f->start; b; b = b->link) {
+    assert(b->id < f->nblk);
+    for (Phi* p = b->phi; p; p = p->link) {
+      uint n0 = 0;
+      for (uint n = 0; n < p->narg; n++) {
+        if (p->blk[n]->id != -1u) {
+          p->blk[n0] = p->blk[n];
+          p->arg[n0] = p->arg[n];
+          n0++;
+        }
+      }
+      assert(n0 > 0);
+      p->narg = n0;
+    }
+  }
 }
 
 static void addpred(Blk* bp, Blk* b) {
@@ -41,8 +37,8 @@ static void addpred(Blk* bp, Blk* b) {
 }
 
 // Each block has a vector of predecessor blocks.
-// s1/s2 for each block is filled out during parse. 's' is maybe "subsequent"?
-// and indicates the edges out of the block.
+// s1/s2 for each block is filled out during parse. 's' is maybe "subsequent" or
+// "successor"? and indicates the edges out of the block.
 // - In the case of fallthrough, s1 will be set to the following block, and s2
 // will be unset.
 // - For an unconditional jump, s1 will be set to the target, s2 will be unset.
@@ -116,7 +112,7 @@ static void fill_rpo_of_function(Fn* f) {
 void fillcfg(Fn* f) {
   fill_rpo_of_function(f);
   fill_preds_of_function(f);
-  fixphis(f);
+  fix_phis_of_function(f);
 }
 
 /* for dominators computation, read
