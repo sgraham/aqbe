@@ -34,6 +34,9 @@ adduse(Tmp *tmp, int ty, Blk *b, ...)
 /* fill usage, width, phi, and class information
  * must not change .visit fields
  */
+// The main goal here is to fill out the |use| vector of all temporaries, as
+// well as determining the correct size for them (based on what instruction
+// creates the temporary, and its arguments).
 void filluse(Fn* fn) {
   Tmp* tmp = fn->tmp;
   // Partial (?) reset of all temporaries. Not reset: name, use, cost, slot,
@@ -84,6 +87,12 @@ void filluse(Fn* fn) {
         }
       }
     }
+
+    // For each instruction in the block, if it has an output (which must be a
+    // temporary), then figure out the correct width for that output. Mark the
+    // |def|inition of the temporary as being this instruction. def doesn't
+    // count as a use though, so it's not added to the |use| vector. For any
+    // arguments of the instruction that are temporaries, note their uses.
     for (Ins* i = b->ins; i < &b->ins[b->nins]; i++) {
       if (!req(i->to, R)) {
         assert(rtype(i->to) == RTmp);
@@ -120,6 +129,9 @@ void filluse(Fn* fn) {
         }
       }
     }
+
+    // If the jmp at the end of the block is conditional based on a temporary,
+    // then note that use as well.
     if (rtype(b->jmp.arg) == RTmp) {
       adduse(&tmp[b->jmp.arg.val], UJmp, b);
     }
