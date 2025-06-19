@@ -395,25 +395,21 @@ static void renblk(Blk* b, Name** stk, Fn* fn) {
 // This function assumes that the reverse postorder (rpo) and use information
 // have already been computed for the function.
 void ssa(Fn* fn) {
-  Name **stk, *n;
-  int d, nt;
-  Blk *b, *b1;
-
-  nt = fn->ntmp;
-  stk = emalloc(nt * sizeof stk[0]);
-  d = debug['L'];
+  int nt = fn->ntmp;
+  Name** stk = emalloc(nt * sizeof stk[0]);
+  int d = debug['L'];
   debug['L'] = 0;
 
   filldom(fn);  // Compute dominator tree for the function
 
   if (debug['N']) {
     fprintf(stderr, "\n> Dominators:\n");
-    for (b1 = fn->start; b1; b1 = b1->link) {
+    for (Blk* b1 = fn->start; b1; b1 = b1->link) {
       if (!b1->dom) {
         continue;
       }
       fprintf(stderr, "%10s:", b1->name);
-      for (b = b1->dom; b; b = b->dlink) {
+      for (Blk* b = b1->dom; b; b = b->dlink) {
         fprintf(stderr, " %s", b->name);
       }
       fprintf(stderr, "\n");
@@ -430,6 +426,7 @@ void ssa(Fn* fn) {
 
   // Clean up the temporary stack.
   while (nt--) {
+    Name* n;
     while ((n = stk[nt])) {
       stk[nt] = n->up;
       nfree(n);
@@ -446,12 +443,9 @@ void ssa(Fn* fn) {
 }
 
 static int phicheck(Phi* p, Blk* b, Ref t) {
-  Blk* b1;
-  uint n;
-
-  for (n = 0; n < p->narg; n++) {
+  for (uint n = 0; n < p->narg; n++) {
     if (req(p->arg[n], t)) {
-      b1 = p->blk[n];
+      Blk* b1 = p->blk[n];
       if (b1 != b && !sdom(b, b1)) {
         return 1;
       }
