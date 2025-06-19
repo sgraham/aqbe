@@ -218,21 +218,32 @@ addfron(Blk *a, Blk *b)
 }
 
 /* fill the dominance frontier */
-void
-fillfron(Fn *fn)
-{
-	Blk *a, *b;
+// Computes the dominance frontier for each block in the function.
+// The dominance frontier of a block b is the set of blocks where control can
+// arrive from both b and another block not strictly dominated by b.
+// This is used in SSA construction to determine where phi nodes are needed.
+void fillfron(Fn* fn) {
+  // First, clear the dominance frontier for all blocks.
+  for (Blk* b = fn->start; b; b = b->link) {
+    b->nfron = 0;
+  }
 
-	for (b=fn->start; b; b=b->link)
-		b->nfron = 0;
-	for (b=fn->start; b; b=b->link) {
-		if (b->s1)
-			for (a=b; !sdom(a, b->s1); a=a->idom)
-				addfron(a, b->s1);
-		if (b->s2)
-			for (a=b; !sdom(a, b->s2); a=a->idom)
-				addfron(a, b->s2);
-	}
+  // For each block, walk up the dominator tree from the block to the root,
+  // adding the block's successors to the dominance frontier of each ancestor
+  // until reaching a block that dominates the successor.
+  // This ensures that the dominance frontier is correctly populated for SSA.
+  for (Blk* b = fn->start; b; b = b->link) {
+    if (b->s1) {
+      for (Blk* a = b; !sdom(a, b->s1); a = a->idom) {
+        addfron(a, b->s1);
+      }
+    }
+    if (b->s2) {
+      for (Blk* a = b; !sdom(a, b->s2); a = a->idom) {
+        addfron(a, b->s2);
+      }
+    }
+  }
 }
 
 static void
