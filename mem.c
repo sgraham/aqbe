@@ -8,6 +8,22 @@ typedef struct Slot Slot;
 
 // Where possible, turns alloca'd slots into temporaries (which are more
 // amendable to optimization that storing/loading into the stack repeatedly).
+
+/**
+ * Promotes stack slots to temporaries when possible.
+ * 
+ * This function analyzes allocation instructions in the entry block
+ * and converts stack slots to temporaries when they are used uniformly
+ * (only by loads and stores of the same size). This optimization
+ * makes the slots more amenable to other optimizations like load
+ * elimination and slot coalescing.
+ * 
+ * The function only processes allocations in the entry block because
+ * it's easier to determine that they're not in loops or complex
+ * control flow structures.
+ * 
+ * @param fn The function to optimize
+ */
 void promote(Fn* fn) {
   /* promote uniform stack slots to temporaries */
 
@@ -138,18 +154,49 @@ struct Slot {
 	int nst;
 };
 
+/**
+ * Checks if a number is within a range.
+ * 
+ * This function checks if a number n is within the range [a, b),
+ * where the range is inclusive of a but exclusive of b.
+ * 
+ * @param r The range to check
+ * @param n The number to check
+ * @return 1 if n is in the range, 0 otherwise
+ */
 static inline int
 rin(Range r, int n)
 {
 	return r.a <= n && n < r.b;
 }
 
+/**
+ * Checks if two ranges overlap.
+ * 
+ * This function determines if two ranges [a0, b0) and [a1, b1)
+ * have any overlap. Two ranges overlap if they share any common
+ * elements.
+ * 
+ * @param r0 First range
+ * @param r1 Second range
+ * @return 1 if the ranges overlap, 0 otherwise
+ */
 static inline int
 rovlap(Range r0, Range r1)
 {
 	return r0.b && r1.b && r0.a < r1.b && r1.a < r0.b;
 }
 
+/**
+ * Extends a range to include a number.
+ * 
+ * This function modifies a range to include the given number.
+ * If the range is empty, it becomes [n, n+1). Otherwise, it
+ * extends the range to include n if necessary.
+ * 
+ * @param r Pointer to the range to modify
+ * @param n The number to include in the range
+ */
 static void
 radd(Range *r, int n)
 {
@@ -161,6 +208,20 @@ radd(Range *r, int n)
 		r->b = n+1;
 }
 
+/**
+ * Finds the slot associated with a reference.
+ * 
+ * This function looks up the slot information for a given reference.
+ * It uses alias analysis to determine if the reference points to a
+ * local variable and returns the corresponding slot if found.
+ * 
+ * @param ps Output parameter for the slot pointer
+ * @param off Output parameter for the offset within the slot
+ * @param r The reference to look up
+ * @param fn The function containing the reference
+ * @param sl Array of slots
+ * @return 1 if a slot was found, 0 otherwise
+ */
 static int
 slot(Slot **ps, int64_t *off, Ref r, Fn *fn, Slot *sl)
 {
@@ -178,6 +239,19 @@ slot(Slot **ps, int64_t *off, Ref r, Fn *fn, Slot *sl)
 	return 1;
 }
 
+/**
+ * Records a load operation on a slot.
+ * 
+ * This function updates the slot information to reflect a load
+ * operation. It marks the loaded bits as live and updates the
+ * slot's range to include the instruction position.
+ * 
+ * @param r The reference being loaded
+ * @param x Bit mask indicating which bits are loaded
+ * @param ip Instruction position
+ * @param fn The function containing the load
+ * @param sl Array of slots
+ */
 static void
 load(Ref r, bits x, int ip, Fn *fn, Slot *sl)
 {
@@ -192,6 +266,20 @@ load(Ref r, bits x, int ip, Fn *fn, Slot *sl)
 	}
 }
 
+/**
+ * Records a store operation on a slot.
+ * 
+ * This function updates the slot information to reflect a store
+ * operation. It marks the stored bits as modified and records
+ * the store instruction for later analysis.
+ * 
+ * @param r The reference being stored to
+ * @param x Bit mask indicating which bits are stored
+ * @param ip Instruction position
+ * @param i The store instruction
+ * @param fn The function containing the store
+ * @param sl Array of slots
+ */
 static void
 store(Ref r, bits x, int ip, Ins *i, Fn *fn, Slot *sl)
 {
@@ -210,6 +298,18 @@ store(Ref r, bits x, int ip, Ins *i, Fn *fn, Slot *sl)
 	}
 }
 
+/**
+ * Compares two slots for sorting.
+ * 
+ * This function is used as a comparison function for qsort to order
+ * slots by size (larger slots first) and then by range start position.
+ * This ordering helps with slot coalescing by processing larger slots
+ * first.
+ * 
+ * @param pa Pointer to first slot
+ * @param pb Pointer to second slot
+ * @return Negative if a < b, 0 if equal, positive if a > b
+ */
 static int
 scmp(const void *pa, const void *pb)
 {
@@ -221,6 +321,16 @@ scmp(const void *pa, const void *pb)
 	return a->r.a - b->r.a;
 }
 
+/**
+ * Updates the maximum reverse post-order number for a loop.
+ * 
+ * This function is used during loop analysis to track the maximum
+ * reverse post-order number within a loop. It's called by the
+ * loop iteration function to build loop information.
+ * 
+ * @param hd The loop header block
+ * @param b The block being processed
+ */
 static void
 maxrpo(Blk *hd, Blk *b)
 {
@@ -228,6 +338,19 @@ maxrpo(Blk *hd, Blk *b)
 		hd->loop = b->id;
 }
 
+/**
+ * Performs slot coalescing to minimize stack usage.
+ * 
+ * This function analyzes the liveness of stack slots and attempts
+ * to coalesce slots that have non-overlapping live ranges. This
+ * optimization reduces the total stack space required by the function
+ * by allowing multiple variables to share the same stack location.
+ * 
+ * The algorithm performs a one-pass liveness analysis and then
+ * sorts slots by size and range to find coalescing opportunities.
+ * 
+ * @param fn The function to optimize
+ */
 void
 coalesce(Fn *fn)
 {

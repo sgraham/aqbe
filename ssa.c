@@ -1,6 +1,19 @@
 #include <stdarg.h>
 #include "all.h"
 
+/**
+ * Adds a use of a temporary variable to its use list.
+ * 
+ * This function is used to track how a temporary variable is used
+ * throughout the function. It adds a use entry to the temporary's
+ * use list, which can be a phi instruction, regular instruction,
+ * or jump instruction.
+ * 
+ * @param tmp The temporary variable to add a use for
+ * @param ty The type of use (UPhi, UIns, or UJmp)
+ * @param b The block where the use occurs
+ * @param ... Variable arguments depending on the use type
+ */
 void adduse(Tmp* tmp, int ty, Blk* b, ...) {
   Use* u;
   int n;
@@ -31,7 +44,20 @@ void adduse(Tmp* tmp, int ty, Blk* b, ...) {
 }
 
 /* fill usage, width, phi, and class information
- * must not change .visit fields
+ * must not change .visit fields */
+/*
+ * Fills usage information for all temporaries in a function.
+ * 
+ * This function analyzes the entire function to determine:
+ * - Where each temporary is defined
+ * - Where each temporary is used
+ * - The width/class of each temporary
+ * - Phi instruction relationships
+ * 
+ * It processes all blocks, instructions, and phi nodes to build
+ * a complete picture of temporary variable usage throughout the function.
+ * 
+ * @param fn The function to analyze
  */
 // The main goal here is to fill out the |use| vector of all temporaries, as
 // well as determining the correct size for them (based on what instruction
@@ -137,6 +163,13 @@ void filluse(Fn* fn) {
   }
 }
 
+/**
+ * Creates a reference to a temporary by its index.
+ * 
+ * @param t The temporary index
+ * @param fn The function containing the temporary
+ * @return A reference to the temporary
+ */
 static Ref refindex(int t, Fn* fn) {
   return newtmp(fn->tmp[t].name, fn->tmp[t].cls, fn);
 }
@@ -147,6 +180,18 @@ static Ref refindex(int t, Fn* fn) {
 // each temporary. It avoids inserting unnecessary phi nodes for variables that
 // are only defined and used in a single block. The algorithm is based on the
 // classic SSA construction using dominance frontiers.
+/**
+ * Inserts phi nodes for variables that require them to convert the function to
+ * SSA form.
+ * 
+ * This function analyzes each temporary to determine where phi nodes
+ * are needed, based on the dominance frontier and the use/def information for
+ * each temporary. It avoids inserting unnecessary phi nodes for variables that
+ * are only defined and used in a single block. The algorithm is based on the
+ * classic SSA construction using dominance frontiers.
+ * 
+ * @param fn The function to convert to SSA form
+ */
 static void phiins(Fn* fn) {
   BSet u[1];
   bsinit(u, fn->nblk);
@@ -263,6 +308,17 @@ struct Name {
 
 static Name* namel;
 
+/**
+ * Creates a new name entry for SSA renaming.
+ * 
+ * Allocates a new Name structure to track SSA name assignments.
+ * Uses a simple free list to reduce allocation overhead.
+ * 
+ * @param r The reference for this name
+ * @param b The block where this name is defined
+ * @param up The previous name in the stack
+ * @return Pointer to the new name entry
+ */
 static Name* nnew(Ref r, Blk* b, Name* up) {
   Name* n;
 
@@ -281,6 +337,11 @@ static Name* nnew(Ref r, Blk* b, Name* up) {
   return n;
 }
 
+/**
+ * Frees a name entry back to the free list.
+ * 
+ * @param n The name entry to free
+ */
 static void nfree(Name* n) {
   n->up = namel;
   namel = n;
@@ -292,6 +353,20 @@ static void nfree(Name* n) {
 // temporary, so that subsequent uses in dominated blocks will refer to the
 // correct version. It also updates the .visit field to track the mapping from
 // original to renamed temporaries.
+/**
+ * Assigns a new SSA name to a definition in a block.
+ * 
+ * This function is called during SSA renaming to create a new version
+ * of a temporary when it is defined. It updates the stack of SSA names
+ * for the temporary, so that subsequent uses in dominated blocks will
+ * refer to the correct version. It also updates the .visit field to
+ * track the mapping from original to renamed temporaries.
+ * 
+ * @param r Pointer to the reference to rename
+ * @param b The block where the definition occurs
+ * @param stk The stack of SSA names for each temporary
+ * @param fn The function being processed
+ */
 static void rendef(Ref* r, Blk* b, Name** stk, Fn* fn) {
   Ref r1;
   int t;
@@ -306,6 +381,18 @@ static void rendef(Ref* r, Blk* b, Name** stk, Fn* fn) {
   *r = r1;
 }
 
+/**
+ * Gets the current SSA name for a temporary from the stack.
+ * 
+ * Searches the stack of SSA names for a temporary to find the
+ * most recent definition that dominates the current block.
+ * Removes any names from the stack that no longer dominate.
+ * 
+ * @param t The temporary index
+ * @param b The current block
+ * @param stk The stack of SSA names
+ * @return The current SSA name for the temporary, or UNDEF if not found
+ */
 static Ref getstk(int t, Blk* b, Name** stk) {
   Name *n, *n1;
 
@@ -329,7 +416,18 @@ static Ref getstk(int t, Blk* b, Name** stk) {
  * of SSA construction. This function traverses the dominator tree, updating
  * references to temporaries so that each use refers to the correct SSA version,
  * and managing the stacks of SSA names for each temporary. It also updates phi
- * nodes in successor blocks to reflect the correct incoming SSA values.
+ * nodes in successor blocks to reflect the correct incoming SSA values. */
+/**
+ * Recursively renames variables in a block and its dominated children.
+ * 
+ * This function traverses the dominator tree, updating references to
+ * temporaries so that each use refers to the correct SSA version, and
+ * managing the stacks of SSA names for each temporary. It also updates
+ * phi nodes in successor blocks to reflect the correct incoming SSA values.
+ * 
+ * @param b The block to process
+ * @param stk The stack of SSA names for each temporary
+ * @param fn The function being processed
  */
 static void renblk(Blk* b, Name** stk, Fn* fn) {
   Phi* p;
@@ -394,6 +492,20 @@ static void renblk(Blk* b, Name** stk, Fn* fn) {
 // Converts the function to SSA (Static Single Assignment) form.
 // This function assumes that the reverse postorder (rpo) and use information
 // have already been computed for the function.
+/**
+ * Converts the function to SSA (Static Single Assignment) form.
+ * 
+ * This function assumes that the reverse postorder (rpo) and use information
+ * have already been computed for the function. The SSA conversion process
+ * involves:
+ * - Computing dominator relationships
+ * - Computing dominance frontiers
+ * - Computing liveness information
+ * - Inserting phi nodes where needed
+ * - Renaming variables to create unique SSA names
+ * 
+ * @param fn The function to convert to SSA form
+ */
 void ssa(Fn* fn) {
   int nt = fn->ntmp;
   Name** stk = emalloc(nt * sizeof stk[0]);
@@ -442,6 +554,17 @@ void ssa(Fn* fn) {
   }
 }
 
+/**
+ * Checks if a phi instruction has a valid argument from a specific block.
+ * 
+ * Validates that if a phi instruction has an argument from a given block,
+ * that block properly dominates the phi instruction's block.
+ * 
+ * @param p The phi instruction to check
+ * @param b The block providing the argument
+ * @param t The argument value to check
+ * @return 1 if the phi argument is valid, 0 otherwise
+ */
 static int phicheck(Phi* p, Blk* b, Ref t) {
   for (uint n = 0; n < p->narg; n++) {
     if (req(p->arg[n], t)) {
@@ -455,6 +578,17 @@ static int phicheck(Phi* p, Blk* b, Ref t) {
 }
 
 /* require use and ssa */
+/**
+ * Performs validation checks on SSA form.
+ * 
+ * This function verifies that the function is in valid SSA form by checking:
+ * - Each SSA temporary is defined at most once
+ * - Every used temporary is defined somewhere
+ * - All uses of SSA values are dominated by their definitions
+ * - Phi instructions have valid arguments from proper predecessor blocks
+ * 
+ * @param fn The function to validate
+ */
 void ssacheck(Fn* fn) {
   Tmp* t;
   Ins* i;

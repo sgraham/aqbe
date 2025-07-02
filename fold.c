@@ -2,6 +2,18 @@
 
 /* boring folding code */
 
+/**
+ * Checks if a constant has a specific value.
+ * 
+ * Compares a constant with a given value, handling both 32-bit and 64-bit
+ * comparisons based on the width parameter. This is used during constant
+ * folding to check for special cases like division by zero.
+ * 
+ * @param c The constant to check
+ * @param w Width flag (0 for 32-bit, 1 for 64-bit)
+ * @param k The value to compare against
+ * @return 1 if the constant equals k, 0 otherwise
+ */
 static int
 iscon(Con *c, int w, uint64_t k)
 {
@@ -13,6 +25,21 @@ iscon(Con *c, int w, uint64_t k)
 		return (uint32_t)c->bits.i == (uint32_t)k;
 }
 
+/**
+ * Performs constant folding for integer operations.
+ * 
+ * This function evaluates constant expressions at compile time by
+ * performing the specified operation on two constant operands. It handles
+ * arithmetic, logical, comparison, and conversion operations. The function
+ * also handles special cases like division by zero and overflow conditions.
+ * 
+ * @param res Output parameter for the result constant
+ * @param op The operation to perform
+ * @param w Width flag (0 for 32-bit, 1 for 64-bit)
+ * @param cl Left operand constant
+ * @param cr Right operand constant
+ * @return 0 on success, 1 if the operation cannot be folded
+ */
 int
 foldint(Con *res, int op, int w, Con *cl, Con *cr)
 {
@@ -151,6 +178,20 @@ foldint(Con *res, int op, int w, Con *cl, Con *cr)
 	return 0;
 }
 
+/**
+ * Performs constant folding for floating-point operations.
+ * 
+ * This function evaluates constant floating-point expressions at compile time
+ * by performing the specified operation on two constant operands. It handles
+ * arithmetic operations and type conversions between floating-point and integer
+ * types. The function supports both single and double precision operations.
+ * 
+ * @param res Output parameter for the result constant
+ * @param op The operation to perform
+ * @param w Width flag (0 for single precision, 1 for double precision)
+ * @param cl Left operand constant
+ * @param cr Right operand constant
+ */
 static void
 foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 {
@@ -202,6 +243,21 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 	}
 }
 
+/**
+ * Performs constant folding for a specific operation and returns a reference.
+ * 
+ * This function is a wrapper around the constant folding functions that
+ * creates a new constant reference in the function's constant table.
+ * It handles both integer and floating-point operations and ensures
+ * proper bit width truncation for 32-bit operations.
+ * 
+ * @param op The operation to perform
+ * @param cls The class of the operation (Kw, Kl, Ks, Kd)
+ * @param cl Left operand constant
+ * @param cr Right operand constant
+ * @param fn The function to add the constant to
+ * @return Reference to the folded constant, or R if folding failed
+ */
 static Ref
 opfold(int op, int cls, Con *cl, Con *cr, Fn *fn)
 {
@@ -221,6 +277,19 @@ opfold(int op, int cls, Con *cl, Con *cr, Fn *fn)
 }
 
 /* used by GVN */
+/**
+ * Attempts to fold an instruction into a constant reference.
+ * 
+ * This function checks if an instruction can be constant-folded by
+ * examining its operands. If both operands are constants and the
+ * operation supports folding, it evaluates the expression at compile
+ * time and returns a reference to the result constant. This is used
+ * by the global value numbering pass to eliminate redundant computations.
+ * 
+ * @param fn The function containing the instruction
+ * @param i The instruction to attempt to fold
+ * @return Reference to the folded constant, or R if folding is not possible
+ */
 Ref
 foldref(Fn *fn, Ins *i)
 {

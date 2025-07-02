@@ -6,6 +6,27 @@ enum {
 	SecBss,
 };
 
+/**
+ * Emits a symbol declaration with appropriate section and linkage attributes.
+ * 
+ * This function generates assembly code for symbol declarations, handling
+ * different object file formats (ELF, Mach-O, PE) and various symbol types.
+ * It supports:
+ * - Function and data symbols
+ * - Thread-local variables (with special handling for Apple platforms)
+ * - Different sections (text, data, bss)
+ * - Export declarations and alignment specifications
+ * 
+ * The function adapts its output based on the target platform, using
+ * appropriate section names and syntax for each format. For thread-local
+ * variables on Apple platforms, it generates the special TLV bootstrap
+ * structure required by the runtime.
+ * 
+ * @param n The symbol name
+ * @param l Linkage information (section, alignment, export status, thread-local)
+ * @param s Section type (SecText, SecData, SecBss)
+ * @param f Output file stream
+ */
 void
 emitlnk(char *n, Lnk *l, int s, FILE *f)
 {
@@ -52,12 +73,40 @@ emitlnk(char *n, Lnk *l, int s, FILE *f)
 	fprintf(f, "%s%s%s:\n", pfx, n, sfx);
 }
 
+/**
+ * Emits a function symbol declaration.
+ * 
+ * This is a convenience wrapper around emitlnk() that specifically
+ * handles function symbols, which are always placed in the text section.
+ * 
+ * @param n The function name
+ * @param l Linkage information
+ * @param f Output file stream
+ */
 void
 emitfnlnk(char *n, Lnk *l, FILE *f)
 {
 	emitlnk(n, l, SecText, f);
 }
 
+/**
+ * Emits data declarations and initializations.
+ * 
+ * This function processes data section declarations and generates
+ * appropriate assembly directives. It handles various data types:
+ * - Byte, halfword, word, and quadword data
+ * - String literals
+ * - Symbol references with offsets
+ * - Zero-initialized data (BSS)
+ * - Common symbols
+ * 
+ * The function uses a state machine approach to accumulate zero
+ * bytes and emit them efficiently using .fill directives. It also
+ * handles special cases like common symbols and string literals.
+ * 
+ * @param d The data declaration to emit
+ * @param f Output file stream
+ */
 void
 emitdat(Dat *d, FILE *f)
 {
@@ -132,6 +181,23 @@ struct Asmbits {
 
 static Asmbits *stash;
 
+/**
+ * Stashes floating-point constants for later emission.
+ * 
+ * This function maintains a list of floating-point constants that need
+ * to be emitted as data. It deduplicates constants by checking if a
+ * constant of the same or larger size already exists. This optimization
+ * reduces the size of the generated assembly by avoiding duplicate
+ * constant definitions.
+ * 
+ * The function supports 32-bit (float), 64-bit (double), and 128-bit
+ * (long double) constants. Constants are stored in a linked list and
+ * indexed for later emission.
+ * 
+ * @param n The bit representation of the floating-point constant
+ * @param size The size of the constant in bytes (4, 8, or 16)
+ * @return The index of the constant in the stash list
+ */
 int
 stashbits(bits n, int size)
 {
@@ -150,6 +216,23 @@ stashbits(bits n, int size)
 	return i;
 }
 
+/**
+ * Emits all stashed floating-point constants.
+ * 
+ * This function generates assembly code for all floating-point constants
+ * that were previously stashed by stashbits(). It organizes constants
+ * by size and emits them in appropriate sections with proper alignment.
+ * 
+ * The function handles different constant sizes:
+ * - 32-bit floats: emitted as .int with comment showing decimal value
+ * - 64-bit doubles: emitted as .quad with comment showing decimal value
+ * - 128-bit long doubles: emitted as two .quad directives
+ * 
+ * After emission, it cleans up the stash list to free memory.
+ * 
+ * @param f Output file stream
+ * @param sec Array of section names for different constant sizes
+ */
 static void
 emitfin(FILE *f, char *sec[3])
 {
@@ -195,6 +278,15 @@ emitfin(FILE *f, char *sec[3])
 	}
 }
 
+/**
+ * Emits ELF-specific finalization directives.
+ * 
+ * This function generates ELF-specific assembly directives at the end
+ * of the file, including floating-point constants and the GNU stack
+ * note section that marks the stack as non-executable.
+ * 
+ * @param f Output file stream
+ */
 void
 elf_emitfin(FILE *f)
 {
@@ -204,6 +296,16 @@ elf_emitfin(FILE *f)
 	fprintf(f, ".section .note.GNU-stack,\"\",@progbits\n");
 }
 
+/**
+ * Emits ELF-specific function finalization directives.
+ * 
+ * This function generates ELF-specific directives that mark the end
+ * of a function, including the function type declaration and size
+ * information for debugging and linking.
+ * 
+ * @param fn The function name
+ * @param f Output file stream
+ */
 void
 elf_emitfnfin(char *fn, FILE *f)
 {
@@ -211,6 +313,16 @@ elf_emitfnfin(char *fn, FILE *f)
 	fprintf(f, ".size %s, .-%s\n", fn, fn);
 }
 
+/**
+ * Emits Mach-O-specific finalization directives.
+ * 
+ * This function generates Mach-O-specific assembly directives at the
+ * end of the file, including floating-point constants in appropriate
+ * Mach-O sections. It handles the special case of 128-bit constants
+ * which are not supported in Mach-O.
+ * 
+ * @param f Output file stream
+ */
 void
 macho_emitfin(FILE *f)
 {
@@ -223,6 +335,15 @@ macho_emitfin(FILE *f)
 	emitfin(f, sec);
 }
 
+/**
+ * Emits PE-specific finalization directives.
+ * 
+ * This function generates PE-specific assembly directives at the end
+ * of the file, including floating-point constants in read-only data
+ * sections.
+ * 
+ * @param f Output file stream
+ */
 void
 pe_emitfin(FILE *f)
 {
@@ -235,6 +356,21 @@ static uint32_t *file;
 static uint nfile;
 static uint curfile;
 
+/**
+ * Emits debug file information.
+ * 
+ * This function manages debug file information for assembly output.
+ * It maintains a list of source files and assigns them unique identifiers
+ * for use in debug location directives. The function deduplicates files
+ * to avoid emitting the same .file directive multiple times.
+ * 
+ * The function uses the intern() function to canonicalize filenames
+ * and maintains a global state of file numbers for the current
+ * compilation unit.
+ * 
+ * @param fn The source filename
+ * @param f Output file stream
+ */
 void
 emitdbgfile(char *fn, FILE *f)
 {
@@ -257,6 +393,21 @@ emitdbgfile(char *fn, FILE *f)
 	fprintf(f, ".file %u %s\n", curfile, fn);
 }
 
+/**
+ * Emits debug location information.
+ * 
+ * This function generates debug location directives that map assembly
+ * instructions back to source code locations. It uses the current file
+ * number (set by emitdbgfile()) and the provided line and column numbers
+ * to create .loc directives for the assembler.
+ * 
+ * The function handles both line-only and line+column location information,
+ * adapting the output format accordingly.
+ * 
+ * @param line The source line number
+ * @param col The source column number (0 if not specified)
+ * @param f Output file stream
+ */
 void
 emitdbgloc(uint line, uint col, FILE *f)
 {

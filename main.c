@@ -37,6 +37,16 @@ static Target *tlist[] = {
 static FILE *outf;
 static int dbg;
 
+/**
+ * Processes data sections from the input file.
+ * 
+ * This function handles data declarations and emits them to the output file.
+ * When debug mode is enabled, it skips data processing entirely.
+ * When a data section ends (DEnd type), it adds a comment marker and frees
+ * all allocated memory.
+ * 
+ * @param d Pointer to the data structure containing the data section information
+ */
 static void
 data(Dat *d)
 {
@@ -49,6 +59,36 @@ data(Dat *d)
 	}
 }
 
+/**
+ * Processes a single function through the complete compilation pipeline.
+ * 
+ * This is the main function processing routine that applies all optimization
+ * and code generation passes in the correct order. The pipeline includes:
+ * - ABI lowering (initial)
+ * - Control flow graph construction
+ * - Use/def analysis
+ * - SSA construction and validation
+ * - Alias analysis
+ * - Load optimization
+ * - Copy coalescing
+ * - Dominance analysis
+ * - Global value numbering
+ * - Global code motion
+ * - ABI lowering (final)
+ * - Instruction simplification
+ * - Instruction selection
+ * - Liveness analysis
+ * - Loop analysis
+ * - Cost analysis
+ * - Register spilling
+ * - Register allocation
+ * - Jump simplification
+ * 
+ * In debug mode, it prints intermediate representations after each pass.
+ * Otherwise, it emits the final assembly code for the function.
+ * 
+ * @param fn Pointer to the function structure to be processed
+ */
 static void
 func(Fn *fn)
 {
@@ -112,12 +152,38 @@ func(Fn *fn)
 	freeall();
 }
 
+/**
+ * Emits debug file information to the output.
+ * 
+ * This function is called during parsing to output debug information
+ * about source files. It delegates to the target-specific debug file
+ * emission function.
+ * 
+ * @param fn The filename to emit debug information for
+ */
 static void
 dbgfile(char *fn)
 {
 	emitdbgfile(fn, outf);
 }
 
+/**
+ * Main entry point for the qbe compiler backend.
+ * 
+ * This function parses command line arguments, sets up the target architecture,
+ * and processes input files through the compilation pipeline. It supports:
+ * - Multiple target architectures (amd64, arm64, rv64)
+ * - Debug output with various flags
+ * - Output file specification
+ * - Multiple input files
+ * 
+ * The compilation process involves parsing SSA-form input, applying
+ * optimizations, and generating target-specific assembly code.
+ * 
+ * @param ac Number of command line arguments
+ * @param av Array of command line argument strings
+ * @return 0 on successful completion, 1 on error
+ */
 int
 main(int ac, char *av[])
 {

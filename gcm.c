@@ -2,6 +2,16 @@
 
 #define NOBID (-1u)
 
+/**
+ * Checks if an instruction is a division or remainder operation.
+ * 
+ * This function identifies division and remainder operations that
+ * are considered pinned (cannot be moved) during global code motion.
+ * Only operations with base class 0 (integer operations) are considered.
+ * 
+ * @param i The instruction to check
+ * @return 1 if the instruction is a division/remainder operation, 0 otherwise
+ */
 static int
 isdivwl(Ins *i)
 {
@@ -16,6 +26,17 @@ isdivwl(Ins *i)
 	}
 }
 
+/**
+ * Checks if an instruction is pinned (cannot be moved).
+ * 
+ * A pinned instruction cannot be moved during global code motion
+ * because it has side effects or must be executed at a specific
+ * point in the program. This includes operations marked as pinned
+ * in the operation table and division/remainder operations.
+ * 
+ * @param i The instruction to check
+ * @return 1 if the instruction is pinned, 0 otherwise
+ */
 int
 pinned(Ins *i)
 {
@@ -23,6 +44,16 @@ pinned(Ins *i)
 }
 
 /* pinned ins that can be eliminated if unused */
+/**
+ * Checks if a pinned instruction can be eliminated if unused.
+ * 
+ * Some pinned instructions can be removed if their result is not used,
+ * even though they cannot be moved. This includes loads, allocations,
+ * and division operations.
+ * 
+ * @param i The instruction to check
+ * @return 1 if the instruction can be eliminated when unused, 0 otherwise
+ */
 static int
 canelim(Ins *i)
 {
@@ -31,6 +62,18 @@ canelim(Ins *i)
 
 static uint earlyins(Fn *, Blk *, Ins *);
 
+/**
+ * Computes the earliest block where a reference can be scheduled.
+ * 
+ * This function determines the earliest point in the control flow graph
+ * where a temporary can be computed. It uses a depth-first search through
+ * the use-def chains to find the earliest block that dominates all uses
+ * of the temporary.
+ * 
+ * @param fn The function containing the reference
+ * @param r The reference to schedule
+ * @return The block ID where the reference can be scheduled earliest
+ */
 static uint
 schedearly(Fn *fn, Ref r)
 {
@@ -57,6 +100,19 @@ schedearly(Fn *fn, Ref r)
 	return t->gcmbid;
 }
 
+/**
+ * Computes the earliest block for an instruction.
+ * 
+ * This function determines the earliest block where an instruction
+ * can be scheduled by finding the latest of its operand's earliest
+ * blocks. If the instruction is pinned, it must remain in its
+ * current block.
+ * 
+ * @param fn The function containing the instruction
+ * @param b The block containing the instruction
+ * @param i The instruction to schedule
+ * @return The earliest block ID where the instruction can be scheduled
+ */
 static uint
 earlyins(Fn *fn, Blk *b, Ins *i)
 {
@@ -73,6 +129,16 @@ earlyins(Fn *fn, Blk *b, Ins *i)
 	return pinned(i) ? b->id : b0;
 }
 
+/**
+ * Computes earliest scheduling for all instructions in a block.
+ * 
+ * This function processes all instructions in a block to compute
+ * their earliest scheduling points. It handles phi instructions,
+ * regular instructions, and jump instructions.
+ * 
+ * @param fn The function containing the block
+ * @param bid The block ID to process
+ */
 static void
 earlyblk(Fn *fn, uint bid)
 {
@@ -94,6 +160,18 @@ earlyblk(Fn *fn, uint bid)
 }
 
 /* least common ancestor in dom tree */
+/**
+ * Finds the least common ancestor of two blocks in the dominator tree.
+ * 
+ * This function computes the least common ancestor of two blocks
+ * in the dominator tree, which represents the earliest point where
+ * both blocks can be reached.
+ * 
+ * @param fn The function containing the blocks
+ * @param bid1 First block ID
+ * @param bid2 Second block ID
+ * @return The block ID of the least common ancestor
+ */
 static uint
 lcabid(Fn *fn, uint bid1, uint bid2)
 {
@@ -109,6 +187,18 @@ lcabid(Fn *fn, uint bid1, uint bid2)
 	return b->id;
 }
 
+/**
+ * Finds the best block for scheduling between early and late bounds.
+ * 
+ * This function finds the optimal block for scheduling an instruction
+ * between its earliest and latest possible positions. It prefers blocks
+ * with lower loop nesting to minimize register pressure.
+ * 
+ * @param fn The function containing the blocks
+ * @param earlybid The earliest block where the instruction can be scheduled
+ * @param latebid The latest block where the instruction can be scheduled
+ * @return The best block ID for scheduling
+ */
 static uint
 bestbid(Fn *fn, uint earlybid, uint latebid)
 {
@@ -136,6 +226,17 @@ static uint latephi(Fn *, Phi *, Ref r);
 static uint latejmp(Blk *, Ref r);
 
 /* return lca bid of ref uses */
+/**
+ * Computes the latest block where a reference can be scheduled.
+ * 
+ * This function determines the latest point in the control flow graph
+ * where a temporary can be computed. It analyzes all uses of the
+ * temporary to find the latest block that post-dominates all uses.
+ * 
+ * @param fn The function containing the reference
+ * @param r The reference to schedule
+ * @return The latest block ID where the reference can be scheduled
+ */
 static uint
 schedlate(Fn *fn, Ref r)
 {
@@ -194,6 +295,21 @@ schedlate(Fn *fn, Ref r)
 
 /* returns lca bid of uses or NOBID if
  * the definition can be eliminated */
+/**
+ * Computes the latest block for a reference used in an instruction.
+ * 
+ * This function determines the latest block where a reference can be
+ * computed when it's used as an operand in an instruction. If the
+ * instruction is pinned, the reference must be available before the
+ * instruction. If the instruction can be eliminated, the reference
+ * might not be needed at all.
+ * 
+ * @param fn The function containing the instruction
+ * @param b The block containing the instruction
+ * @param i The instruction using the reference
+ * @param r The reference being used
+ * @return The latest block ID where the reference can be computed
+ */
 static uint
 lateins(Fn *fn, Blk *b, Ins *i, Ref r)
 {
@@ -213,6 +329,19 @@ lateins(Fn *fn, Blk *b, Ins *i, Ref r)
 	return latebid;
 }
 
+/**
+ * Computes the latest block for a reference used in a phi instruction.
+ * 
+ * This function determines the latest block where a reference can be
+ * computed when it's used as an argument in a phi instruction. It
+ * finds the least common ancestor of all blocks that provide the
+ * reference to the phi.
+ * 
+ * @param fn The function containing the phi instruction
+ * @param p The phi instruction using the reference
+ * @param r The reference being used
+ * @return The latest block ID where the reference can be computed
+ */
 static uint
 latephi(Fn *fn, Phi *p, Ref r)
 {
@@ -231,6 +360,17 @@ latephi(Fn *fn, Phi *p, Ref r)
 	return latebid;
 }
 
+/**
+ * Computes the latest block for a reference used in a jump instruction.
+ * 
+ * This function determines the latest block where a reference can be
+ * computed when it's used as the argument in a jump instruction.
+ * The reference must be available in the block containing the jump.
+ * 
+ * @param b The block containing the jump instruction
+ * @param r The reference being used in the jump
+ * @return The block ID where the reference can be computed
+ */
 static uint
 latejmp(Blk *b, Ref r)
 {
@@ -242,6 +382,16 @@ latejmp(Blk *b, Ref r)
 	}
 }
 
+/**
+ * Computes latest scheduling for all instructions in a block.
+ * 
+ * This function processes all instructions in a block to compute
+ * their latest scheduling points. It also removes unused phi
+ * instructions and marks them for elimination.
+ * 
+ * @param fn The function containing the block
+ * @param bid The block ID to process
+ */
 static void
 lateblk(Fn *fn, uint bid)
 {
@@ -262,6 +412,17 @@ lateblk(Fn *fn, uint bid)
 			schedlate(fn, i->to);
 }
 
+/**
+ * Adds instructions to their target blocks during global code motion.
+ * 
+ * This function adds instructions that have been moved to their
+ * target blocks during the global code motion phase. It uses the
+ * gcmbid field to determine where each instruction should be placed.
+ * 
+ * @param fn The function containing the instructions
+ * @param vins Array of instructions to add
+ * @param nins Number of instructions in the array
+ */
 static void
 addgcmins(Fn *fn, Ins *vins, uint nins)
 {
@@ -281,6 +442,16 @@ addgcmins(Fn *fn, Ins *vins, uint nins)
  * end of their target block; use-
  * before-def errors are fixed by
  * schedblk */
+/**
+ * Moves live instructions to their target blocks.
+ * 
+ * This function performs the actual movement of instructions during
+ * global code motion. It collects instructions that need to be moved
+ * and adds them to their target blocks. Instructions that are pinned
+ * and cannot be eliminated are left in place.
+ * 
+ * @param fn The function to optimize
+ */
 static void
 gcmmove(Fn *fn)
 {
@@ -309,6 +480,21 @@ gcmmove(Fn *fn)
 }
 
 /* dfs ordering */
+/**
+ * Schedules instructions within a block using depth-first search.
+ * 
+ * This function performs instruction scheduling within a block by
+ * using a depth-first search to ensure that instructions are ordered
+ * correctly with respect to their dependencies. It groups instructions
+ * and schedules them in dependency order.
+ * 
+ * @param fn The function containing the block
+ * @param b The block to schedule
+ * @param i The instruction to start scheduling from
+ * @param pvins Pointer to the instruction array
+ * @param pnins Pointer to the number of instructions
+ * @return Pointer to the next instruction after the scheduled group
+ */
 static Ins *
 schedins(Fn *fn, Blk *b, Ins *i, Ins **pvins, uint *pnins)
 {
@@ -334,6 +520,16 @@ schedins(Fn *fn, Blk *b, Ins *i, Ins **pvins, uint *pnins)
 }
 
 /* order ins within a block */
+/**
+ * Orders instructions within each block.
+ * 
+ * This function performs instruction scheduling within each block
+ * to ensure proper ordering of instructions with respect to their
+ * dependencies. It uses a depth-first search approach to schedule
+ * instructions correctly.
+ * 
+ * @param fn The function to schedule
+ */
 static void
 schedblk(Fn *fn)
 {
@@ -351,6 +547,17 @@ schedblk(Fn *fn)
 	vfree(vins);
 }
 
+/**
+ * Checks if an instruction is cheap to compute.
+ * 
+ * This function determines if an instruction is considered "cheap"
+ * and can be sunk to its point of use to reduce register pressure.
+ * Cheap instructions are typically simple arithmetic and logical
+ * operations that have low computational cost.
+ * 
+ * @param i The instruction to check
+ * @return 1 if the instruction is cheap, 0 otherwise
+ */
 static int
 cheap(Ins *i)
 {
@@ -375,6 +582,18 @@ cheap(Ins *i)
 	}
 }
 
+/**
+ * Sinks a reference to its point of use if beneficial.
+ * 
+ * This function attempts to sink the definition of a reference to
+ * its point of use if the definition is cheap to compute and can
+ * be moved. This helps reduce register pressure by computing values
+ * closer to where they are used.
+ * 
+ * @param fn The function containing the reference
+ * @param b The block where the reference is used
+ * @param pr Pointer to the reference to sink
+ */
 static void
 sinkref(Fn *fn, Blk *b, Ref *pr)
 {
@@ -405,7 +624,19 @@ sinkref(Fn *fn, Blk *b, Ref *pr)
 
 /* redistribute trivial ops to point of
  * use to reduce register pressure
- * requires rpo, use; breaks use
+ * requires rpo, use; breaks use */
+/**
+ * Performs instruction sinking to reduce register pressure.
+ * 
+ * This function redistributes trivial operations to their points of
+ * use to reduce register pressure. It sinks cheap instructions that
+ * are used in loads, stores, and jumps to minimize the number of
+ * live temporaries at any point in the program.
+ * 
+ * The optimization requires reverse post-order numbering and use
+ * information, and may break the use information.
+ * 
+ * @param fn The function to optimize
  */
 static void
 sink(Fn *fn)
@@ -426,7 +657,22 @@ sink(Fn *fn)
 
 /* requires use dom
  * maintains rpo pred dom
- * breaks use
+ * breaks use */
+/**
+ * Performs global code motion optimization on a function.
+ * 
+ * This function implements global code motion, which moves instructions
+ * to optimal positions in the control flow graph to improve performance
+ * and reduce register pressure. The optimization:
+ * - Computes earliest and latest scheduling points for each instruction
+ * - Moves instructions to their optimal positions
+ * - Sinks cheap instructions to their points of use
+ * - Maintains proper instruction ordering within blocks
+ * 
+ * The optimization requires use information and dominator relationships,
+ * and maintains reverse post-order numbering and predecessor information.
+ * 
+ * @param fn The function to optimize
  */
 void
 gcm(Fn *fn)

@@ -1,5 +1,24 @@
 #include "all.h"
 
+/**
+ * Retrieves alias information for a given reference.
+ * 
+ * This function analyzes a reference (temporary or constant) and fills in
+ * the alias structure with information about what memory location it refers to.
+ * For temporaries, it looks up the alias information stored in the function's
+ * temporary table. For constants, it determines if they represent addresses
+ * (symbols) or immediate values.
+ * 
+ * The function handles different alias types:
+ * - Stack-based aliases (ALoc, AEsc) with slot information
+ * - Symbol-based aliases (ASym) for global variables
+ * - Constant-based aliases (ACon) for immediate values
+ * - Unknown aliases (AUnk) for complex expressions
+ * 
+ * @param a Pointer to the alias structure to be filled
+ * @param r The reference to analyze (temporary or constant)
+ * @param fn The function containing the reference
+ */
 void
 getalias(Alias *a, Ref r, Fn *fn)
 {
@@ -27,6 +46,34 @@ getalias(Alias *a, Ref r, Fn *fn)
 	}
 }
 
+/**
+ * Determines if two memory references alias each other.
+ * 
+ * This function performs alias analysis between two memory references,
+ * considering their base addresses, offsets, and sizes. It returns one of
+ * three possible results:
+ * - NoAlias: The references definitely do not overlap
+ * - MayAlias: The references might overlap (conservative analysis)
+ * - MustAlias: The references definitely overlap
+ * 
+ * The analysis handles various cases:
+ * - Stack-based references (same or different slots)
+ * - Symbol-based references (global variables)
+ * - Constant-based references (immediate addresses)
+ * - Unknown references (complex expressions)
+ * 
+ * The function computes the offset difference and overlap detection
+ * to make precise alias decisions when possible.
+ * 
+ * @param p First memory reference
+ * @param op Offset for the first reference
+ * @param sp Size of the first reference
+ * @param q Second memory reference
+ * @param sq Size of the second reference
+ * @param delta Pointer to store the offset difference
+ * @param fn The function containing the references
+ * @return Alias relationship (NoAlias, MayAlias, or MustAlias)
+ */
 int
 alias(Ref p, int op, int sp, Ref q, int sq, int *delta, Fn *fn)
 {
@@ -83,6 +130,21 @@ alias(Ref p, int op, int sp, Ref q, int sq, int *delta, Fn *fn)
 	return NoAlias;
 }
 
+/**
+ * Checks if a reference escapes the current function scope.
+ * 
+ * This function determines whether a reference (typically a temporary)
+ * can be accessed outside the current function. A reference escapes if:
+ * - It's not a temporary (e.g., constants always escape)
+ * - It's a stack-based reference that has been marked as escaped
+ * 
+ * This information is crucial for optimization decisions, as escaped
+ * references cannot be safely optimized or eliminated.
+ * 
+ * @param r The reference to check for escaping
+ * @param fn The function containing the reference
+ * @return 1 if the reference escapes, 0 otherwise
+ */
 int
 escapes(Ref r, Fn *fn)
 {
@@ -94,6 +156,17 @@ escapes(Ref r, Fn *fn)
 	return !astack(a->type) || a->slot->type == AEsc;
 }
 
+/**
+ * Marks a reference as escaped.
+ * 
+ * This function marks a reference as having escaped the function scope,
+ * which prevents certain optimizations from being applied to it.
+ * For temporaries, it updates the slot type to AEsc if the reference
+ * is stack-based.
+ * 
+ * @param r The reference to mark as escaped
+ * @param fn The function containing the reference
+ */
 static void
 esc(Ref r, Fn *fn)
 {
@@ -107,6 +180,22 @@ esc(Ref r, Fn *fn)
 	}
 }
 
+/**
+ * Updates the liveness mask for a stack slot based on a store operation.
+ * 
+ * This function tracks which bits of a stack slot are modified by a store
+ * operation. It updates the liveness mask to reflect which bits are
+ * definitely written, which helps with dead code elimination and
+ * optimization of stack operations.
+ * 
+ * The function handles cases where the store size and offset might
+ * exceed the bit tracking limits, in which case it marks all bits
+ * as potentially modified.
+ * 
+ * @param r The reference being stored to
+ * @param sz The size of the store operation in bytes
+ * @param fn The function containing the store
+ */
 static void
 store(Ref r, int sz, Fn *fn)
 {
@@ -129,6 +218,32 @@ store(Ref r, int sz, Fn *fn)
 	}
 }
 
+/**
+ * Performs comprehensive alias analysis for an entire function.
+ * 
+ * This function analyzes all memory references in a function to determine
+ * their alias relationships and escape properties. It processes:
+ * - All temporaries, initializing their alias information
+ * - Phi nodes, marking their results as unknown aliases
+ * - All instructions, tracking memory operations and their effects
+ * - Function parameters and return values for escape analysis
+ * 
+ * The analysis builds a complete picture of memory usage patterns,
+ * which enables various optimizations including:
+ * - Dead code elimination
+ * - Load/store optimization
+ * - Register allocation decisions
+ * - Stack slot optimization
+ * 
+ * The function handles special cases like:
+ * - Allocation instructions (Oalloc)
+ * - Copy instructions that propagate alias information
+ * - Address arithmetic (Oadd)
+ * - Memory operations (loads/stores)
+ * - Block copy operations (Oblit0/Oblit1)
+ * 
+ * @param fn The function to analyze
+ */
 void
 fillalias(Fn *fn)
 {

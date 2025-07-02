@@ -1,5 +1,22 @@
 #include "all.h"
 
+/**
+ * Computes the liveness information for a block based on its successor.
+ * 
+ * This function calculates which temporaries are live at the entry of a block
+ * based on the liveness information of its successor block. It handles:
+ * - Copying the successor's live-in set as a starting point
+ * - Removing temporaries that are defined by phi nodes in the successor
+ * - Adding temporaries that are used as phi arguments from the current block
+ * 
+ * The function is a key component of the backward dataflow analysis used
+ * in liveness computation. It ensures that phi nodes are handled correctly
+ * by considering both their definitions and their uses.
+ * 
+ * @param v Bit set to store the computed liveness information
+ * @param b The current block being analyzed
+ * @param s The successor block whose liveness information is used
+ */
 void
 liveon(BSet *v, Blk *b, Blk *s)
 {
@@ -19,6 +36,21 @@ liveon(BSet *v, Blk *b, Blk *s)
 			}
 }
 
+/**
+ * Adds a reference to the live set of a block.
+ * 
+ * This helper function adds a temporary reference to the live set of a block
+ * and updates the live count for the appropriate register class. It only
+ * adds temporaries that aren't already in the live set to avoid double-counting.
+ * 
+ * The function is used during the backward scan of instructions to build
+ * the complete liveness information for a block.
+ * 
+ * @param r The reference to add to the live set
+ * @param b The block whose live set is being updated
+ * @param nlv Array of live counts for each register class
+ * @param tmp Array of temporary information
+ */
 static void
 bset(Ref r, Blk *b, int *nlv, Tmp *tmp)
 {
@@ -33,7 +65,30 @@ bset(Ref r, Blk *b, int *nlv, Tmp *tmp)
 }
 
 /* liveness analysis
- * requires rpo computation
+ * requires rpo computation */
+/**
+ * Performs liveness analysis for an entire function.
+ * 
+ * This function implements a backward dataflow analysis to determine
+ * which temporaries are live at each point in the function. Liveness
+ * analysis is crucial for register allocation and optimization.
+ * 
+ * The analysis works by:
+ * 1. Initializing all blocks with empty live sets
+ * 2. Iteratively propagating liveness information backward through the CFG
+ * 3. Handling special cases like function calls and phi nodes
+ * 4. Computing live counts for register allocation
+ * 
+ * The function handles complex cases including:
+ * - Function calls with argument and return register management
+ * - Memory operations with base and index register tracking
+ * - Phi nodes with proper liveness propagation
+ * - Global register usage and caller-saved register handling
+ * 
+ * The analysis requires that the function's blocks are in reverse
+ * post-order (RPO) for efficient convergence.
+ * 
+ * @param f The function to analyze
  */
 void
 filllive(Fn *f)

@@ -8,6 +8,22 @@ struct Ext {
 	char usew; /* uses only the low usew bits of arg */
 };
 
+/**
+ * Extracts extension instruction properties from an instruction.
+ * 
+ * This function analyzes extension instructions (extsb, extub, extsh, etc.)
+ * and fills in the Ext structure with information about the extension:
+ * - zext: Whether it's a zero extension (1) or sign extension (0)
+ * - nopw: Maximum argument width for which this extension is a no-op
+ * - usew: Number of bits from the argument that are actually used
+ * 
+ * The function uses a static table to map extension opcodes to their
+ * properties, enabling efficient analysis of extension operations.
+ * 
+ * @param i The instruction to analyze
+ * @param e Pointer to the Ext structure to fill
+ * @return 1 if the instruction is an extension, 0 otherwise
+ */
 static int
 ext(Ins *i, Ext *e)
 {
@@ -26,6 +42,19 @@ ext(Ins *i, Ext *e)
 	return 1;
 }
 
+/**
+ * Calculates the minimum number of bits needed to represent a value.
+ * 
+ * This function determines the bit width required to represent an unsigned
+ * 64-bit value. It uses a binary search approach to efficiently find the
+ * highest set bit, which represents the minimum width needed.
+ * 
+ * For example, a value of 5 (binary 101) requires 3 bits, while a value
+ * of 255 (binary 11111111) requires 8 bits.
+ * 
+ * @param v The 64-bit unsigned value to analyze
+ * @return The minimum number of bits needed to represent the value
+ */
 static int
 bitwidth(uint64_t v)
 {
@@ -42,6 +71,24 @@ bitwidth(uint64_t v)
 }
 
 /* no more than w bits are used */
+/**
+ * Checks if a reference is used with a width no greater than the specified limit.
+ * 
+ * This function analyzes all uses of a temporary to determine if it's only
+ * used in contexts where no more than 'w' bits are needed. It handles:
+ * - Phi node uses (recursively checking the phi result)
+ * - Copy instruction uses (propagating the width constraint)
+ * - Extension instruction uses (checking if the extension is redundant)
+ * - Bitwise AND operations (checking if the mask constrains the width)
+ * 
+ * This analysis is crucial for determining when extensions can be eliminated
+ * or when narrower types can be used instead of wider ones.
+ * 
+ * @param fn The function containing the reference
+ * @param r The reference to analyze (must be a temporary)
+ * @param w The maximum width in bits that should be used
+ * @return 1 if the reference is only used with width <= w, 0 otherwise
+ */
 static int
 usewidthle(Fn *fn, Ref r, int w)
 {
@@ -107,6 +154,16 @@ usewidthle(Fn *fn, Ref r, int w)
 	return 1;
 }
 
+/**
+ * Returns the minimum of two integer values.
+ * 
+ * A simple utility function to find the smaller of two integers.
+ * Used throughout the copy elimination analysis for width calculations.
+ * 
+ * @param v1 First integer value
+ * @param v2 Second integer value
+ * @return The smaller of the two values
+ */
 static int
 min_(int v1, int v2)
 {
@@ -114,6 +171,27 @@ min_(int v1, int v2)
 }
 
 /* is the ref narrower than w bits */
+/**
+ * Checks if a reference is defined with a width no greater than the specified limit.
+ * 
+ * This function analyzes how a temporary is defined to determine if it
+ * can be represented with no more than 'w' bits. It handles various
+ * definition patterns:
+ * - Constants (checking their bit width)
+ * - Copy instructions (recursively checking the source)
+ * - Shift operations (adjusting width based on shift amount)
+ * - Comparison operations (always 1 bit result)
+ * - Bitwise operations (AND, OR, XOR with width analysis)
+ * - Extension operations (checking if they're redundant)
+ * 
+ * This analysis works together with usewidthle() to determine when
+ * extensions can be eliminated or when narrower types can be used.
+ * 
+ * @param fn The function containing the reference
+ * @param r The reference to analyze
+ * @param w The maximum width in bits that should be sufficient
+ * @return 1 if the reference can be defined with width <= w, 0 otherwise
+ */
 static int
 defwidthle(Fn *fn, Ref r, int w)
 {
@@ -193,6 +271,17 @@ defwidthle(Fn *fn, Ref r, int w)
 	return 0;
 }
 
+/**
+ * Checks if a reference is defined as a single bit value.
+ * 
+ * This is a convenience function that checks if a reference can be
+ * defined with a width of 1 bit, which is useful for boolean
+ * operations and conditional expressions.
+ * 
+ * @param fn The function containing the reference
+ * @param r The reference to check
+ * @return 1 if the reference is defined as a single bit, 0 otherwise
+ */
 static int
 isw1(Fn *fn, Ref r)
 {
@@ -204,7 +293,24 @@ isw1(Fn *fn, Ref r)
  * helps factoring extensions out of
  * loops
  *
- * needs use; breaks use
+ * needs use; breaks use */
+/**
+ * Inserts early extension instructions for parameters used only narrowly.
+ * 
+ * This optimization inserts zero-extension instructions (extub, extuh)
+ * early in the function for parameters that are only used with narrow
+ * widths. This helps factor extensions out of loops, improving
+ * performance by moving expensive operations to the function entry.
+ * 
+ * The function only applies this optimization to functions containing
+ * loops, as the benefit comes from avoiding repeated extensions
+ * within loop bodies. It analyzes parameter uses to determine the
+ * minimum width needed and inserts appropriate extensions.
+ * 
+ * This optimization requires use analysis and may break existing
+ * use information, requiring it to be recomputed.
+ * 
+ * @param fn The function to optimize
  */
 void
 narrowpars(Fn *fn)
@@ -262,6 +368,27 @@ narrowpars(Fn *fn)
 	}
 }
 
+/**
+ * Attempts to find a copy-equivalent reference for an instruction.
+ * 
+ * This function analyzes an instruction to determine if it can be
+ * replaced by a simpler reference. It handles various cases:
+ * - Direct copy instructions
+ * - Identity operations (e.g., x + 0, x * 1)
+ * - Idempotent operations with identical arguments
+ * - Comparison operations with identical arguments
+ * - Zero/non-zero comparisons with constant inference
+ * - Redundant bitwise AND operations with power-of-2 masks
+ * - Redundant extension operations
+ * 
+ * The function uses width analysis to ensure that type safety is
+ * maintained when eliminating extensions or other operations.
+ * 
+ * @param fn The function containing the instruction
+ * @param b The block containing the instruction
+ * @param i The instruction to analyze
+ * @return A reference that can replace the instruction, or R if no replacement is possible
+ */
 Ref
 copyref(Fn *fn, Blk *b, Ins *i)
 {
@@ -346,6 +473,20 @@ copyref(Fn *fn, Blk *b, Ins *i)
 	return R;
 }
 
+/**
+ * Checks if two phi nodes have equivalent arguments.
+ * 
+ * This function compares two phi nodes to determine if they have
+ * the same arguments in the same order. It's used to identify
+ * redundant phi nodes that can be eliminated.
+ * 
+ * The function assumes that both phi nodes have the same number
+ * of arguments and compares them block by block.
+ * 
+ * @param pa First phi node to compare
+ * @param pb Second phi node to compare
+ * @return 1 if the phi nodes are equivalent, 0 otherwise
+ */
 static int
 phieq(Phi *pa, Phi *pb)
 {
@@ -361,6 +502,25 @@ phieq(Phi *pa, Phi *pb)
 	return 1;
 }
 
+/**
+ * Attempts to find a copy-equivalent reference for a phi node.
+ * 
+ * This function analyzes a phi node to determine if it can be
+ * replaced by a simpler reference. It handles various cases:
+ * - Phi nodes with identical arguments (can be replaced by any argument)
+ * - Phi nodes equivalent to previous phi nodes in the same block
+ * - Phi nodes that can be replaced by a dominating conditional
+ *   expression (when the phi represents a boolean selection)
+ * 
+ * The function uses dominance analysis to identify cases where
+ * a phi node's value is determined by a conditional branch in
+ * a dominating block.
+ * 
+ * @param fn The function containing the phi node
+ * @param b The block containing the phi node
+ * @param p The phi node to analyze
+ * @return A reference that can replace the phi node, or R if no replacement is possible
+ */
 Ref
 phicopyref(Fn *fn, Blk *b, Phi *p)
 {

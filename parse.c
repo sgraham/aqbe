@@ -2,6 +2,13 @@
 #include <ctype.h>
 #include <stdarg.h>
 
+// -----------------------------------------------------------------------------
+// This file implements the parser for the QBE intermediate representation (IR).
+// It handles tokenization, parsing of functions, types, data, and top-level
+// constructs, and builds the in-memory representation of the IR for further
+// compilation stages.
+// -----------------------------------------------------------------------------
+
 enum {
 	Ksb = 4, /* matches Oarg/Opar/Jret */
 	Kub,
@@ -14,6 +21,7 @@ enum {
 	Km = Kl, /* memory pointer */
 };
 
+// Table of operation properties, filled from ops.h
 Op optab[NOp] = {
 #undef F
 #define F(cf, hi, id, co, as, im, ic, lg, cv, pn) \
@@ -29,12 +37,17 @@ Op optab[NOp] = {
 };
 
 typedef enum {
-	PXXX,
-	PLbl,
-	PPhi,
-	PIns,
-	PEnd,
+	PXXX,   // No state
+	PLbl,   // Parsing a label
+	PPhi,   // Parsing phi instructions
+	PIns,   // Parsing regular instructions
+	PEnd,   // End of function/block
 } PState;
+
+// Token types for the lexer
+// These include keywords, punctuation, and literal types
+// Used throughout the parser to identify the next input
+// See also: kwmap[] for string mapping
 
 enum Token {
 	Txxx = 0,
@@ -171,6 +184,13 @@ static int nblk;
 static int rcls;
 static uint ntyp;
 
+/**
+ * Reports a fatal error, prints a formatted message with file and line number,
+ * and exits the program. Used for unrecoverable parse errors.
+ *
+ * @param s Format string for the error message
+ * @param ... Arguments for the format string
+ */
 void
 err(char *s, ...)
 {
@@ -184,6 +204,10 @@ err(char *s, ...)
 	exit(1);
 }
 
+/**
+ * Initializes the lexer keyword hash table. Populates kwmap and lexh
+ * for fast keyword lookup. Only runs once per process.
+ */
 static void
 lexinit()
 {
@@ -206,6 +230,10 @@ lexinit()
 	done = 1;
 }
 
+/**
+ * Reads an integer literal from the input file, handling optional minus sign.
+ * Returns the parsed integer as int64_t. Used by the lexer for Tint tokens.
+ */
 static int64_t
 getint()
 {
@@ -227,6 +255,13 @@ getint()
 	return *(int64_t *)&n;
 }
 
+/**
+ * Lexical analyzer: reads the next token from the input file and sets tokval.
+ * Handles keywords, identifiers, literals, punctuation, and comments.
+ * Returns the token type (enum Token value).
+ *
+ * @return Token type (enum Token)
+ */
 static int
 lex()
 {
@@ -337,6 +372,12 @@ Alpha:
 	return t;
 }
 
+/**
+ * Peeks at the next token without consuming it.
+ * If the lookahead token (thead) is not set, calls lex() to fetch it.
+ *
+ * @return The next token type (enum Token)
+ */
 static int
 peek()
 {
@@ -345,6 +386,13 @@ peek()
 	return thead;
 }
 
+/**
+ * Consumes and returns the next token.
+ * If a lookahead token is set, returns it and clears the lookahead.
+ * Otherwise, calls peek() to fetch the next token.
+ *
+ * @return The next token type (enum Token)
+ */
 static int
 next()
 {
@@ -355,6 +403,12 @@ next()
 	return t;
 }
 
+/**
+ * Consumes tokens until a non-newline token is found, then returns it.
+ * Used to skip blank lines in the parser.
+ *
+ * @return The next non-newline token type (enum Token)
+ */
 static int
 nextnl()
 {
@@ -365,6 +419,12 @@ nextnl()
 	return t;
 }
 
+/**
+ * Consumes the next token and checks that it matches the expected type.
+ * If not, reports a parse error and exits.
+ *
+ * @param t The expected token type
+ */
 static void
 expect(int t)
 {
@@ -391,6 +451,13 @@ expect(int t)
 	err(buf);
 }
 
+/**
+ * Looks up or creates a temporary variable reference by name.
+ * Used for parsing SSA temporary references (e.g., %tmp).
+ *
+ * @param v Name of the temporary variable
+ * @return Reference to the temporary (TMP(t))
+ */
 static Ref
 tmpref(char *v)
 {
@@ -420,6 +487,12 @@ tmpref(char *v)
 	return TMP(t);
 }
 
+/**
+ * Parses a reference (temporary, constant, global, thread, or literal).
+ * Handles %tmp, integer, float, double, thread, global, and string references.
+ *
+ * @return The parsed reference (Ref)
+ */
 static Ref
 parseref()
 {
@@ -457,6 +530,13 @@ parseref()
 	return newcon(&c, curf);
 }
 
+/**
+ * Finds a type index by name in the typ[] array.
+ * Used for resolving :typename references during parsing.
+ *
+ * @param i Number of types to search
+ * @return Index of the matching type, or error if not found
+ */
 static int
 findtyp(int i)
 {
@@ -466,6 +546,13 @@ findtyp(int i)
 	err("undefined type :%s", tokval.str);
 }
 
+/**
+ * Parses a type/class specifier (e.g., :type, sb, ub, sh, uh, w, l, s, d).
+ * Optionally sets the type index for :type.
+ *
+ * @param tyn Pointer to store type index (for :type)
+ * @return Class code (Kc, Ksb, Kub, etc.)
+ */
 static int
 parsecls(int *tyn)
 {
@@ -494,6 +581,14 @@ parsecls(int *tyn)
 	}
 }
 
+/**
+ * Parses a function argument or parameter list.
+ * Handles variadic arguments, environment parameters, and type classes.
+ * Emits appropriate Oarg/Opar instructions for each argument.
+ *
+ * @param arg 1 if parsing arguments, 0 if parsing parameters
+ * @return 1 if function is variadic, 0 otherwise
+ */
 static int
 parserefl(int arg)
 {
@@ -567,6 +662,13 @@ parserefl(int arg)
 	return vararg;
 }
 
+/**
+ * Finds or creates a basic block by name.
+ * Used for label resolution and jump targets.
+ *
+ * @param name Name of the block
+ * @return Pointer to the found or created block
+ */
 static Blk *
 findblk(char *name)
 {
@@ -585,6 +687,10 @@ findblk(char *name)
 	return b;
 }
 
+/**
+ * Closes the current basic block by duplicating its instructions.
+ * Resets the instruction buffer for the next block.
+ */
 static void
 closeblk()
 {
@@ -593,6 +699,14 @@ closeblk()
 	curi = insb;
 }
 
+/**
+ * Parses a single line of the function body.
+ * Handles labels, instructions, phi nodes, jumps, returns, and block ends.
+ * Updates the parser state machine and emits instructions as needed.
+ *
+ * @param ps Current parser state (PState)
+ * @return Next parser state (PState)
+ */
 static PState
 parseline(PState ps)
 {
@@ -794,6 +908,15 @@ parseline(PState ps)
 	}
 }
 
+/**
+ * Checks if a reference is used with the correct type/class in the function.
+ * Allows some flexibility for word/long class merging.
+ *
+ * @param r Reference to check
+ * @param k Expected class
+ * @param fn Function containing the reference
+ * @return 1 if the reference is valid, 0 otherwise
+ */
 static int
 usecheck(Ref r, int k, Fn *fn)
 {
@@ -801,6 +924,13 @@ usecheck(Ref r, int k, Fn *fn)
 		|| (fn->tmp[r.val].cls == Kl && k == Kw);
 }
 
+/**
+ * Performs type checking and validation for all instructions and phi nodes
+ * in a function. Ensures that temporaries are assigned consistent types,
+ * phi nodes match predecessor blocks, and jump arguments are valid.
+ *
+ * @param fn Function to type check
+ */
 static void
 typecheck(Fn *fn)
 {
@@ -892,6 +1022,14 @@ typecheck(Fn *fn)
 	}
 }
 
+/**
+ * Parses a function definition, including its signature, parameters,
+ * body, and all contained blocks and instructions. Handles variadic
+ * and environment parameters, and sets up the function's data structures.
+ *
+ * @param lnk Linkage information for the function
+ * @return Pointer to the parsed function (Fn *)
+ */
 static Fn *
 parsefn(Lnk *lnk)
 {
@@ -950,6 +1088,15 @@ parsefn(Lnk *lnk)
 	return curf;
 }
 
+/**
+ * Parses the fields of a struct or union type.
+ * Handles primitive and user-defined types, alignment, and padding.
+ * Updates the type's size and alignment.
+ *
+ * @param fld Array of fields to fill
+ * @param ty Type being constructed
+ * @param t Initial token for the field
+ */
 static void
 parsefields(Field *fld, Typ *ty, int t)
 {
@@ -1016,6 +1163,11 @@ parsefields(Field *fld, Typ *ty, int t)
 	ty->align = al;
 }
 
+/**
+ * Parses a type definition, including its name, alignment, and fields.
+ * Handles both struct and union types, as well as 'dark' types (opaque).
+ * Updates the global typ[] array with the new type.
+ */
 static void
 parsetyp()
 {
@@ -1073,6 +1225,12 @@ parsetyp()
 	ty->nunion = n;
 }
 
+/**
+ * Parses a data reference for a data section entry.
+ * Handles global/thread references and optional offsets.
+ *
+ * @param d Data entry to update
+ */
 static void
 parsedatref(Dat *d)
 {
@@ -1090,6 +1248,12 @@ parsedatref(Dat *d)
 	}
 }
 
+/**
+ * Parses a string literal for a data section entry.
+ * Updates the data entry with the string value.
+ *
+ * @param d Data entry to update
+ */
 static void
 parsedatstr(Dat *d)
 {
@@ -1097,6 +1261,14 @@ parsedatstr(Dat *d)
 	d->u.str = tokval.str;
 }
 
+/**
+ * Parses a data section entry, including its name, alignment, and contents.
+ * Handles all supported data types (integers, floats, strings, references).
+ * Calls the provided callback for each parsed data item.
+ *
+ * @param cb Callback to invoke for each data item
+ * @param lnk Linkage information for the data
+ */
 static void
 parsedat(void cb(Dat *), Lnk *lnk)
 {
@@ -1167,6 +1339,14 @@ Done:
 	cb(&d);
 }
 
+/**
+ * Parses linkage attributes for a function or data section.
+ * Handles export, thread, common, and section attributes.
+ * Updates the Lnk structure with the parsed attributes.
+ *
+ * @param lnk Linkage structure to update
+ * @return The next token after linkage attributes
+ */
 static int
 parselnk(Lnk *lnk)
 {
@@ -1203,6 +1383,17 @@ parselnk(Lnk *lnk)
 		}
 }
 
+/**
+ * Main entry point for parsing a QBE IR file.
+ * Handles top-level constructs: dbgfile, function, data, type, and EOF.
+ * Calls the appropriate callback for each parsed item.
+ *
+ * @param f Input file pointer
+ * @param path Path to the input file (for error messages)
+ * @param dbgfile Callback for debug file directives
+ * @param data Callback for data section entries
+ * @param func Callback for function definitions
+ */
 void
 parse(FILE *f, char *path, void dbgfile(char *), void data(Dat *), void func(Fn *))
 {
@@ -1245,6 +1436,13 @@ parse(FILE *f, char *path, void dbgfile(char *), void data(Dat *), void func(Fn 
 	}
 }
 
+/**
+ * Prints a constant value to a file for debugging or IR output.
+ * Handles addresses, bits, and floating-point constants.
+ *
+ * @param c Constant to print
+ * @param f Output file pointer
+ */
 static void
 printcon(Con *c, FILE *f)
 {
@@ -1269,6 +1467,14 @@ printcon(Con *c, FILE *f)
 	}
 }
 
+/**
+ * Prints a reference (temporary, constant, slot, etc.) to a file.
+ * Used for debugging and IR output.
+ *
+ * @param r Reference to print
+ * @param fn Function context (for temporary names)
+ * @param f Output file pointer
+ */
 void
 printref(Ref r, Fn *fn, FILE *f)
 {
@@ -1328,6 +1534,14 @@ printref(Ref r, Fn *fn, FILE *f)
 	}
 }
 
+/**
+ * Prints a function in QBE IR format to a file.
+ * Includes all blocks, phi nodes, instructions, and jumps.
+ * Used for debugging and IR output.
+ *
+ * @param fn Function to print
+ * @param f Output file pointer
+ */
 void
 printfn(Fn *fn, FILE *f)
 {

@@ -39,6 +39,13 @@ static int nptr = 1;
 
 static Bucket itbl[IMask+1]; /* string interning table */
 
+/**
+ * Computes a simple hash value for a string.
+ * Uses a basic rolling hash algorithm: h = char + 17*h for each character.
+ * 
+ * @param s The string to hash
+ * @return 32-bit hash value
+ */
 uint32_t
 hash(char *s)
 {
@@ -49,6 +56,14 @@ hash(char *s)
 	return h;
 }
 
+/**
+ * Fatal error handler that prints an error message and aborts the program.
+ * Used for unrecoverable errors during compilation.
+ * 
+ * @param file Source file name where error occurred
+ * @param s Format string for error message
+ * @param ... Variable arguments for format string
+ */
 void
 die_(char *file, char *s, ...)
 {
@@ -62,6 +77,13 @@ die_(char *file, char *s, ...)
 	abort();
 }
 
+/**
+ * Allocates memory with error checking.
+ * Calls calloc to zero-initialize the memory and aborts if allocation fails.
+ * 
+ * @param n Number of bytes to allocate
+ * @return Pointer to allocated memory, never NULL
+ */
 void *
 emalloc(size_t n)
 {
@@ -73,6 +95,14 @@ emalloc(size_t n)
 	return p;
 }
 
+/**
+ * Allocates memory from the compiler's memory pool.
+ * Uses a simple pool-based allocator for temporary allocations during compilation.
+ * Memory is automatically freed when freeall() is called.
+ * 
+ * @param n Number of bytes to allocate
+ * @return Pointer to allocated memory, or NULL if n is 0
+ */
 void *
 alloc(size_t n)
 {
@@ -89,6 +119,11 @@ alloc(size_t n)
 	return pool[nptr++] = emalloc(n);
 }
 
+/**
+ * Frees all memory allocated through the pool allocator.
+ * Traverses the pool chain and frees all allocated blocks.
+ * Resets the pool state for reuse.
+ */
 void
 freeall()
 {
@@ -107,6 +142,15 @@ freeall()
 	nptr = 1;
 }
 
+/**
+ * Creates a new dynamic vector with specified capacity.
+ * Vectors can grow automatically and support different memory pools.
+ * 
+ * @param len Initial capacity (will be rounded up to power of 2)
+ * @param esz Size of each element in bytes
+ * @param pool Memory pool to use (PHeap for permanent, other for temporary)
+ * @return Pointer to vector data (vector header is hidden)
+ */
 void *
 vnew(ulong len, size_t esz, Pool pool)
 {
@@ -125,6 +169,12 @@ vnew(ulong len, size_t esz, Pool pool)
 	return v + 1;
 }
 
+/**
+ * Frees a vector allocated with vnew().
+ * Only frees vectors allocated from the heap pool.
+ * 
+ * @param p Pointer to vector data (returned by vnew)
+ */
 void
 vfree(void *p)
 {
@@ -138,6 +188,13 @@ vfree(void *p)
 	}
 }
 
+/**
+ * Grows a vector to accommodate at least 'len' elements.
+ * Reallocates and copies data if current capacity is insufficient.
+ * 
+ * @param vp Pointer to vector pointer (will be updated if reallocation occurs)
+ * @param len Minimum number of elements needed
+ */
 void
 vgrow(void *vp, ulong len)
 {
@@ -154,6 +211,14 @@ vgrow(void *vp, ulong len)
 	*(Vec **)vp = v1;
 }
 
+/**
+ * Adds an instruction to a dynamic instruction array.
+ * Skips no-op instructions and grows the array if needed.
+ * 
+ * @param pvins Pointer to instruction array pointer
+ * @param pnins Pointer to instruction count
+ * @param i Instruction to add
+ */
 void
 addins(Ins **pvins, uint *pnins, Ins *i)
 {
@@ -163,6 +228,13 @@ addins(Ins **pvins, uint *pnins, Ins *i)
 	(*pvins)[(*pnins)-1] = *i;
 }
 
+/**
+ * Adds all instructions from a basic block to a dynamic instruction array.
+ * 
+ * @param b Basic block containing instructions to add
+ * @param pvins Pointer to instruction array pointer
+ * @param pnins Pointer to instruction count
+ */
 void
 addbins(Blk *b, Ins **pvins, uint *pnins)
 {
@@ -172,6 +244,14 @@ addbins(Blk *b, Ins **pvins, uint *pnins)
 		addins(pvins, pnins, i);
 }
 
+/**
+ * Formats a string into a fixed-size buffer.
+ * Uses vsnprintf for safe string formatting.
+ * 
+ * @param str Destination buffer (must be NString bytes)
+ * @param s Format string
+ * @param ... Variable arguments for format string
+ */
 void
 strf(char str[NString], char *s, ...)
 {
@@ -182,6 +262,14 @@ strf(char str[NString], char *s, ...)
 	va_end(ap);
 }
 
+/**
+ * Interns a string for efficient comparison and storage.
+ * Returns a unique integer ID for the string. Identical strings
+ * get the same ID, enabling fast string comparison.
+ * 
+ * @param s String to intern
+ * @return Unique integer ID for the string
+ */
 uint32_t
 intern(char *s)
 {
@@ -210,6 +298,12 @@ intern(char *s)
 	return h + (n<<IBits);
 }
 
+/**
+ * Retrieves a string from its interned ID.
+ * 
+ * @param id Interned string ID returned by intern()
+ * @return Pointer to the original string
+ */
 char *
 str(uint32_t id)
 {
@@ -217,12 +311,27 @@ str(uint32_t id)
 	return itbl[id&IMask].str[id>>IBits];
 }
 
+/**
+ * Checks if a reference is a register (hardware register).
+ * 
+ * @param r Reference to check
+ * @return 1 if reference is a register, 0 otherwise
+ */
 int
 isreg(Ref r)
 {
 	return rtype(r) == RTmp && r.val < Tmp0;
 }
 
+/**
+ * Checks if an operation is a comparison operation.
+ * Sets the comparison kind and condition code if it is.
+ * 
+ * @param op Operation code to check
+ * @param pk Pointer to store comparison kind (Kw, Kl, Ks, Kd)
+ * @param pc Pointer to store condition code
+ * @return 1 if op is a comparison, 0 otherwise
+ */
 int
 iscmp(int op, int *pk, int *pc)
 {
@@ -247,6 +356,16 @@ iscmp(int op, int *pk, int *pc)
 	return 1;
 }
 
+/**
+ * Groups related instructions together.
+ * Identifies instruction groups like blit pairs, parameter passing,
+ * and function calls, returning the start and end of each group.
+ * 
+ * @param b Basic block containing the instruction
+ * @param i Instruction to group
+ * @param i0 Pointer to store start of instruction group
+ * @param i1 Pointer to store end of instruction group
+ */
 void
 igroup(Blk *b, Ins *i, Ins **i0, Ins **i1)
 {
@@ -292,12 +411,29 @@ igroup(Blk *b, Ins *i, Ins **i0, Ins **i1)
 	}
 }
 
+/**
+ * Gets the argument class for an instruction's nth argument.
+ * 
+ * @param i Instruction to examine
+ * @param n Argument index (0 or 1)
+ * @return Argument class (Kx, Kw, Kl, etc.)
+ */
 int
 argcls(Ins *i, int n)
 {
 	return optab[i->op].argcls[n][i->cls];
 }
 
+/**
+ * Emits an instruction to the current instruction buffer.
+ * Instructions are emitted in reverse order (curi decrements).
+ * 
+ * @param op Operation code
+ * @param k Class of the instruction
+ * @param to Destination reference
+ * @param arg0 First argument
+ * @param arg1 Second argument
+ */
 void
 emit(int op, int k, Ref to, Ref arg0, Ref arg1)
 {
@@ -309,12 +445,25 @@ emit(int op, int k, Ref to, Ref arg0, Ref arg1)
 	};
 }
 
+/**
+ * Emits a complete instruction structure.
+ * 
+ * @param i Instruction to emit
+ */
 void
 emiti(Ins i)
 {
 	emit(i.op, i.cls, i.to, i.arg[0], i.arg[1]);
 }
 
+/**
+ * Duplicates instructions into a basic block.
+ * Replaces the block's instructions with the provided ones.
+ * 
+ * @param b Basic block to update
+ * @param s Source instructions
+ * @param n Number of instructions to copy
+ */
 void
 idup(Blk *b, Ins *s, ulong n)
 {
@@ -323,6 +472,14 @@ idup(Blk *b, Ins *s, ulong n)
 	b->nins = n;
 }
 
+/**
+ * Copies instructions from source to destination.
+ * 
+ * @param d Destination instruction array
+ * @param s Source instruction array
+ * @param n Number of instructions to copy
+ * @return Pointer past the last copied instruction
+ */
 Ins *
 icpy(Ins *d, Ins *s, ulong n)
 {
@@ -353,6 +510,13 @@ static int cmptab[][2] ={
 	[NCmpI+Cfuo] = {NCmpI+Cfo,  NCmpI+Cfuo},
 };
 
+/**
+ * Negates a comparison condition.
+ * Returns the opposite condition (e.g., < becomes >=).
+ * 
+ * @param c Comparison condition to negate
+ * @return Negated comparison condition
+ */
 int
 cmpneg(int c)
 {
@@ -360,6 +524,13 @@ cmpneg(int c)
 	return cmptab[c][0];
 }
 
+/**
+ * Swaps a comparison condition.
+ * Returns the swapped condition (e.g., < becomes >).
+ * 
+ * @param c Comparison condition to swap
+ * @return Swapped comparison condition
+ */
 int
 cmpop(int c)
 {
@@ -367,6 +538,13 @@ cmpop(int c)
 	return cmptab[c][1];
 }
 
+/**
+ * Negates a word/long comparison operation.
+ * Converts the operation code to its negated form.
+ * 
+ * @param op Comparison operation to negate
+ * @return Negated comparison operation
+ */
 int
 cmpwlneg(int op)
 {
@@ -377,6 +555,15 @@ cmpwlneg(int op)
 	die("not a wl comparison");
 }
 
+/**
+ * Merges two register classes.
+ * Attempts to find a common class that can represent both inputs.
+ * Returns 1 if classes are incompatible, 0 if merge succeeds.
+ * 
+ * @param pk Pointer to first class (will be updated with merged class)
+ * @param k Second class to merge
+ * @return 1 if classes are incompatible, 0 if merge succeeds
+ */
 int
 clsmerge(short *pk, short k)
 {
@@ -400,6 +587,16 @@ clsmerge(short *pk, short k)
 // TODO: I think this is following phi instructions back through a chain of
 // temporaries and returning the outermost that's still a phi. It also has the
 // side-effect of collapsing the ones that it walks through.
+
+/**
+ * Follows phi instruction chains to find the root temporary.
+ * Collapses phi chains by updating phi pointers during traversal.
+ * Used for register allocation to find the ultimate source of a value.
+ * 
+ * @param t Temporary index to trace
+ * @param tmp Array of all temporaries
+ * @return Index of the root temporary (no longer a phi)
+ */
 int phicls(int t, Tmp* tmp) {
   int t1 = tmp[t].phi;
   if (!t1) {
@@ -410,6 +607,13 @@ int phicls(int t, Tmp* tmp) {
   return t2;
 }
 
+/**
+ * Finds the argument index for a phi instruction from a specific block.
+ * 
+ * @param p Phi instruction to examine
+ * @param b Block to find argument for
+ * @return Argument index, or -1 if block not found
+ */
 uint
 phiargn(Phi *p, Blk *b)
 {
@@ -422,6 +626,13 @@ phiargn(Phi *p, Blk *b)
 	return -1;
 }
 
+/**
+ * Gets the argument value for a phi instruction from a specific block.
+ * 
+ * @param p Phi instruction to examine
+ * @param b Block to get argument for
+ * @return Reference to the argument value
+ */
 Ref
 phiarg(Phi *p, Blk *b)
 {
@@ -432,6 +643,15 @@ phiarg(Phi *p, Blk *b)
 	return p->arg[n];
 }
 
+/**
+ * Creates a new temporary variable.
+ * Allocates a temporary with the specified class and optional prefix.
+ * 
+ * @param prfx Optional prefix for temporary name (can be NULL)
+ * @param k Register class for the temporary
+ * @param fn Function to add temporary to
+ * @return Reference to the new temporary
+ */
 Ref
 newtmp(char *prfx, int k,  Fn *fn)
 {
@@ -450,6 +670,14 @@ newtmp(char *prfx, int k,  Fn *fn)
 	return TMP(t);
 }
 
+/**
+ * Changes the use count of a reference.
+ * Updates the use count of a temporary if the reference is to a temporary.
+ * 
+ * @param r Reference to update use count for
+ * @param du Delta to add to use count
+ * @param fn Function containing the temporary
+ */
 void
 chuse(Ref r, int du, Fn *fn)
 {
@@ -457,12 +685,27 @@ chuse(Ref r, int du, Fn *fn)
 		fn->tmp[r.val].nuse += du;
 }
 
+/**
+ * Compares two symbols for equality.
+ * 
+ * @param s0 First symbol
+ * @param s1 Second symbol
+ * @return 1 if symbols are equal, 0 otherwise
+ */
 int
 symeq(Sym s0, Sym s1)
 {
 	return s0.type == s1.type && s0.id == s1.id;
 }
 
+/**
+ * Creates a new constant or finds an existing identical one.
+ * Deduplicates constants to save memory and enable constant folding.
+ * 
+ * @param c0 Constant to add
+ * @param fn Function to add constant to
+ * @return Reference to the constant (new or existing)
+ */
 Ref
 newcon(Con *c0, Fn *fn)
 {
@@ -481,6 +724,13 @@ newcon(Con *c0, Fn *fn)
 	return CON(i);
 }
 
+/**
+ * Gets or creates a constant with the specified integer value.
+ * 
+ * @param val Integer value for the constant
+ * @param fn Function to add constant to
+ * @return Reference to the constant
+ */
 Ref
 getcon(int64_t val, Fn *fn)
 {
@@ -495,6 +745,15 @@ getcon(int64_t val, Fn *fn)
 	return CON(c);
 }
 
+/**
+ * Adds two constants together.
+ * Performs constant folding for address arithmetic and integer addition.
+ * 
+ * @param c0 First constant (will be updated with result)
+ * @param c1 Second constant to add
+ * @param m Multiplier for second constant
+ * @return 1 if addition succeeded, 0 if it failed
+ */
 int
 addcon(Con *c0, Con *c1, int m)
 {
@@ -515,6 +774,15 @@ addcon(Con *c0, Con *c1, int m)
 	return 1;
 }
 
+/**
+ * Checks if a reference is a constant with an integer value.
+ * Extracts the value if it is.
+ * 
+ * @param fn Function containing the reference
+ * @param r Reference to check
+ * @param v Pointer to store the integer value
+ * @return 1 if reference is a constant integer, 0 otherwise
+ */
 int
 isconbits(Fn *fn, Ref r, int64_t *v)
 {
@@ -530,6 +798,14 @@ isconbits(Fn *fn, Ref r, int64_t *v)
 	return 0;
 }
 
+/**
+ * Generates stack allocation instructions.
+ * Ensures stack alignment and handles both constant and variable sizes.
+ * 
+ * @param rt Temporary to store allocated address
+ * @param rs Reference to allocation size
+ * @param fn Function to add instructions to
+ */
 void
 salloc(Ref rt, Ref rs, Fn *fn)
 {
@@ -560,6 +836,13 @@ salloc(Ref rt, Ref rs, Fn *fn)
 	}
 }
 
+/**
+ * Initializes a bitset for use.
+ * Allocates storage for the specified number of elements.
+ * 
+ * @param bs Bitset to initialize
+ * @param n Number of elements the bitset should support
+ */
 void
 bsinit(BSet *bs, uint n)
 {
@@ -569,6 +852,14 @@ bsinit(BSet *bs, uint n)
 }
 
 MAKESURE(NBit_is_64, NBit == 64);
+
+/**
+ * Counts the number of set bits in a 64-bit word.
+ * Uses a parallel bit counting algorithm.
+ * 
+ * @param b 64-bit word to count bits in
+ * @return Number of set bits
+ */
 inline static uint
 popcnt(bits b)
 {
@@ -581,6 +872,13 @@ popcnt(bits b)
 	return b & 0xff;
 }
 
+/**
+ * Finds the position of the first set bit in a 64-bit word.
+ * Returns the least significant bit position (0-63).
+ * 
+ * @param b 64-bit word to find first bit in
+ * @return Position of first set bit (0-63)
+ */
 inline static int
 firstbit(bits b)
 {
@@ -607,6 +905,12 @@ firstbit(bits b)
 	return n;
 }
 
+/**
+ * Counts the number of set elements in a bitset.
+ * 
+ * @param bs Bitset to count
+ * @return Number of set elements
+ */
 uint
 bscount(BSet *bs)
 {
@@ -618,12 +922,24 @@ bscount(BSet *bs)
 	return n;
 }
 
+/**
+ * Gets the maximum element number a bitset can represent.
+ * 
+ * @param bs Bitset to check
+ * @return Maximum element number
+ */
 static inline uint
 bsmax(BSet *bs)
 {
 	return bs->nt * NBit;
 }
 
+/**
+ * Sets a bit in a bitset.
+ * 
+ * @param bs Bitset to modify
+ * @param elt Element number to set
+ */
 void
 bsset(BSet *bs, uint elt)
 {
@@ -631,6 +947,12 @@ bsset(BSet *bs, uint elt)
 	bs->t[elt/NBit] |= BIT(elt%NBit);
 }
 
+/**
+ * Clears a bit in a bitset.
+ * 
+ * @param bs Bitset to modify
+ * @param elt Element number to clear
+ */
 void
 bsclr(BSet *bs, uint elt)
 {
@@ -654,6 +976,13 @@ BSOP(bsunion, |=)
 BSOP(bsinter, &=)
 BSOP(bsdiff, &= ~)
 
+/**
+ * Compares two bitsets for equality.
+ * 
+ * @param a First bitset
+ * @param b Second bitset
+ * @return 1 if bitsets are equal, 0 otherwise
+ */
 int
 bsequal(BSet *a, BSet *b)
 {
@@ -666,6 +995,11 @@ bsequal(BSet *a, BSet *b)
 	return 1;
 }
 
+/**
+ * Clears all bits in a bitset.
+ * 
+ * @param bs Bitset to clear
+ */
 void
 bszero(BSet *bs)
 {
@@ -677,6 +1011,15 @@ bszero(BSet *bs)
  * 	for (i=0; bsiter(set, &i); i++)
  * 		use(i);
  *
+ */
+
+/**
+ * Iterates over set elements in a bitset.
+ * Updates the element pointer to the next set element.
+ * 
+ * @param bs Bitset to iterate over
+ * @param elt Pointer to current element (will be updated)
+ * @return 1 if more elements exist, 0 if iteration is complete
  */
 int
 bsiter(BSet *bs, int *elt)
@@ -700,6 +1043,14 @@ bsiter(BSet *bs, int *elt)
 	return 1;
 }
 
+/**
+ * Prints a bitset of temporaries for debugging.
+ * Shows the names of temporaries in the set.
+ * 
+ * @param bs Bitset to print
+ * @param tmp Array of temporaries
+ * @param f Output file
+ */
 void
 dumpts(BSet *bs, Tmp *tmp, FILE *f)
 {
@@ -711,6 +1062,16 @@ dumpts(BSet *bs, Tmp *tmp, FILE *f)
 	fprintf(f, " ]\n");
 }
 
+/**
+ * Executes a pattern matching bytecode against a reference.
+ * Used for instruction pattern matching and transformation.
+ * The bytecode implements a simple stack-based virtual machine.
+ * 
+ * @param code Bytecode to execute
+ * @param tn Array of temporary numbers for pattern matching
+ * @param ref Reference to match against
+ * @param var Array to store matched variables
+ */
 void
 runmatch(uchar *code, Num *tn, Ref ref, Ref *var)
 {

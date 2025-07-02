@@ -28,12 +28,34 @@ static int loop;       /* current loop level */
 static uint stmov;     /* stats: added moves */
 static uint stblk;     /* stats: added blocks */
 
+/**
+ * Returns a pointer to the hint register for a temporary.
+ * 
+ * This function retrieves the register hint for a temporary based on
+ * its phi class. Register hints are used to guide register allocation
+ * decisions, helping to minimize the number of register-to-register
+ * copies needed.
+ * 
+ * @param t The temporary index
+ * @return Pointer to the hint register field
+ */
 static int *
 hint(int t)
 {
 	return &tmp[phicls(t, tmp)].hint.r;
 }
 
+/**
+ * Sets a register hint for a temporary.
+ * 
+ * This function establishes a register preference for a temporary,
+ * which helps the register allocator make better decisions. The hint
+ * is only set if no hint exists or if the current loop level is
+ * deeper than the existing hint's loop level.
+ * 
+ * @param t The temporary index
+ * @param r The register to hint for
+ */
 static void
 sethint(int t, int r)
 {
@@ -47,6 +69,17 @@ sethint(int t, int r)
 	}
 }
 
+/**
+ * Copies register mapping information from one map to another.
+ * 
+ * This function performs a deep copy of register mapping data,
+ * including temporary-to-register mappings, wait lists, and bit sets.
+ * It's used to save and restore register allocation state during
+ * the allocation process.
+ * 
+ * @param ma Destination register map
+ * @param mb Source register map
+ */
 static void
 rcopy(RMap *ma, RMap *mb)
 {
@@ -57,6 +90,17 @@ rcopy(RMap *ma, RMap *mb)
 	ma->n = mb->n;
 }
 
+/**
+ * Finds the register allocated to a temporary in a register map.
+ * 
+ * This function searches through a register map to find which register
+ * (if any) is currently allocated to a given temporary. It returns -1
+ * if no register is allocated.
+ * 
+ * @param m The register map to search
+ * @param t The temporary to look up
+ * @return The register number, or -1 if not found
+ */
 static int
 rfind(RMap *m, int t)
 {
@@ -68,6 +112,18 @@ rfind(RMap *m, int t)
 	return -1;
 }
 
+/**
+ * Returns a reference to a temporary's allocated register or spill slot.
+ * 
+ * This function provides a unified way to access a temporary's location,
+ * whether it's in a register or spilled to memory. If the temporary is
+ * in a register, it returns a register reference; otherwise, it returns
+ * a slot reference for the spilled temporary.
+ * 
+ * @param m The register map
+ * @param t The temporary index
+ * @return Reference to the temporary's location (register or slot)
+ */
 static Ref
 rref(RMap *m, int t)
 {
@@ -82,6 +138,17 @@ rref(RMap *m, int t)
 		return TMP(r);
 }
 
+/**
+ * Adds a temporary-to-register mapping to a register map.
+ * 
+ * This function establishes a mapping between a temporary and a register,
+ * updating the register map's data structures and tracking register usage.
+ * It performs various validity checks to ensure the allocation is legal.
+ * 
+ * @param m The register map to update
+ * @param t The temporary to allocate
+ * @param r The register to allocate to the temporary
+ */
 static void
 radd(RMap *m, int t, int r)
 {
@@ -100,6 +167,25 @@ radd(RMap *m, int t, int r)
 	regu |= BIT(r);
 }
 
+/**
+ * Attempts to allocate a register for a temporary.
+ * 
+ * This function tries to find an available register for a temporary,
+ * using hints and fallback strategies. If the 'try' parameter is true,
+ * it returns R (no allocation) instead of failing when no register
+ * is available. This allows for graceful handling of register pressure.
+ * 
+ * The allocation strategy:
+ * 1. Use the temporary's visit field if available
+ * 2. Use the temporary's hint if available
+ * 3. Find any available register in the appropriate class
+ * 4. Spill a register if necessary
+ * 
+ * @param m The register map
+ * @param t The temporary to allocate
+ * @param try If true, return R instead of failing
+ * @return Reference to the allocated register, or R if allocation failed
+ */
 static Ref
 ralloctry(RMap *m, int t, int try)
 {
@@ -148,12 +234,33 @@ Found:
 	return TMP(r);
 }
 
+/**
+ * Allocates a register for a temporary, failing if none available.
+ * 
+ * This is a convenience wrapper around ralloctry() that always
+ * attempts to allocate a register and fails if none is available.
+ * 
+ * @param m The register map
+ * @param t The temporary to allocate
+ * @return Reference to the allocated register
+ */
 static inline Ref
 ralloc(RMap *m, int t)
 {
 	return ralloctry(m, t, 0);
 }
 
+/**
+ * Frees a register allocation for a temporary.
+ * 
+ * This function removes a temporary-to-register mapping from a register
+ * map, updating all related data structures. It returns the register
+ * that was freed, or -1 if the temporary wasn't allocated.
+ * 
+ * @param m The register map
+ * @param t The temporary to free
+ * @return The register that was freed, or -1 if not found
+ */
 static int
 rfree(RMap *m, int t)
 {
@@ -174,6 +281,14 @@ rfree(RMap *m, int t)
 	return r;
 }
 
+/**
+ * Dumps register mapping information for debugging.
+ * 
+ * This function prints the current register allocations in a human-readable
+ * format, showing which temporaries are mapped to which registers.
+ * 
+ * @param m The register map to dump
+ */
 static void
 mdump(RMap *m)
 {
@@ -187,6 +302,18 @@ mdump(RMap *m)
 	fprintf(stderr, "\n");
 }
 
+/**
+ * Adds a move to the parallel move list.
+ * 
+ * This function adds a source-to-destination move to the parallel move
+ * list, which will be processed later to generate optimal move sequences.
+ * The moves are collected to handle complex register allocation scenarios
+ * efficiently.
+ * 
+ * @param src Source reference
+ * @param dst Destination reference
+ * @param k The class of the move
+ */
 static void
 pmadd(Ref src, Ref dst, int k)
 {
@@ -200,6 +327,21 @@ pmadd(Ref src, Ref dst, int k)
 
 enum PMStat { ToMove, Moving, Moved };
 
+/**
+ * Recursively processes parallel moves to handle cycles.
+ * 
+ * This function implements a recursive algorithm to process parallel moves
+ * while detecting and handling cycles. It uses a depth-first search approach
+ * with three states for each move: ToMove, Moving, and Moved.
+ * 
+ * When a cycle is detected, it generates a swap instruction to break the
+ * cycle. For non-cyclic moves, it generates copy instructions.
+ * 
+ * @param status Array tracking the state of each move
+ * @param i Index of the current move to process
+ * @param k Pointer to the class of the current move sequence
+ * @return Index of the cycle start, or -1 if no cycle
+ */
 static int
 pmrec(enum PMStat *status, int i, int *k)
 {
@@ -246,6 +388,14 @@ pmrec(enum PMStat *status, int i, int *k)
 	return c;
 }
 
+/**
+ * Generates instructions for all parallel moves.
+ * 
+ * This function processes the entire parallel move list, generating
+ * the necessary instructions to perform all moves while handling
+ * cycles efficiently. It uses the recursive pmrec() function to
+ * process each move in the correct order.
+ */
 static void
 pmgen()
 {
@@ -259,6 +409,17 @@ pmgen()
 			pmrec(status, i, (int[]){pm[i].cls});
 }
 
+/**
+ * Moves a register to a new location, handling conflicts.
+ * 
+ * This function moves a register to a new location (register or temporary),
+ * handling any conflicts that arise. If the destination is already occupied,
+ * it spills the current occupant and reallocates it elsewhere.
+ * 
+ * @param r The register to move
+ * @param to The destination reference
+ * @param m The register map
+ */
 static void
 move(int r, Ref to, RMap *m)
 {
@@ -280,12 +441,35 @@ move(int r, Ref to, RMap *m)
 	radd(m, t, r);
 }
 
+/**
+ * Checks if an instruction is a register-to-register copy.
+ * 
+ * This function determines if an instruction is a copy operation
+ * where the source is a register. Such instructions are handled
+ * specially during register allocation.
+ * 
+ * @param i The instruction to check
+ * @return 1 if it's a register copy, 0 otherwise
+ */
 static int
 regcpy(Ins *i)
 {
 	return i->op == Ocopy && isreg(i->arg[0]);
 }
 
+/**
+ * Processes parallel moves at the beginning of a block.
+ * 
+ * This function handles a sequence of register-to-register copy
+ * instructions at the start of a block, converting them into
+ * parallel moves and generating optimal move sequences. It also
+ * handles function calls by managing caller-saved registers.
+ * 
+ * @param b The block containing the moves
+ * @param i Pointer to the first instruction to process
+ * @param m The register map
+ * @return Pointer to the instruction after the processed moves
+ */
 static Ins *
 dopm(Blk *b, Ins *i, RMap *m)
 {
@@ -329,6 +513,17 @@ dopm(Blk *b, Ins *i, RMap *m)
 	return i;
 }
 
+/**
+ * Compares two references for allocation priority.
+ * 
+ * This function implements a simple heuristic to determine which
+ * reference should be allocated first. Currently, it prioritizes
+ * references that have register hints.
+ * 
+ * @param r1 First reference
+ * @param r2 Second reference
+ * @return Positive if r1 has higher priority, negative if r2 does
+ */
 static int
 prio1(Ref r1, Ref r2)
 {
@@ -340,6 +535,17 @@ prio1(Ref r1, Ref r2)
 	return *hint(r1.val) != -1;
 }
 
+/**
+ * Inserts a reference into a priority-sorted array.
+ * 
+ * This function maintains a sorted array of references based on
+ * allocation priority. It uses insertion sort to keep the array
+ * ordered by the prio1() comparison function.
+ * 
+ * @param r The reference to insert
+ * @param rs Array of reference pointers
+ * @param p Current position in the array
+ */
 static void
 insert(Ref *r, Ref **rs, int p)
 {
@@ -352,6 +558,22 @@ insert(Ref *r, Ref **rs, int p)
 	}
 }
 
+/**
+ * Processes register allocation for a single block.
+ * 
+ * This function performs register allocation for all instructions
+ * in a block, working backwards from the end. It handles:
+ * - Function calls and their register requirements
+ * - Register-to-register copies
+ * - Memory operations with register operands
+ * - Register hints and optimizations
+ * 
+ * The function maintains a register map that tracks which temporaries
+ * are in which registers, and generates move instructions as needed.
+ * 
+ * @param b The block to process
+ * @param cur The current register map
+ */
 static void
 doblk(Blk *b, RMap *cur)
 {
@@ -471,7 +693,28 @@ prio2(int t1, int t2)
 }
 
 /* register allocation
- * depends on rpo, phi, cost, (and obviously spill)
+ * depends on rpo, phi, cost, (and obviously spill) */
+/**
+ * Performs register allocation for an entire function.
+ * 
+ * This function implements a complete register allocation pass that:
+ * 1. Sets up the allocation environment and initializes data structures
+ * 2. Assigns registers to temporaries in each block
+ * 3. Emits copies for phi nodes and block transitions
+ * 4. Creates new blocks for complex move sequences
+ * 
+ * The algorithm uses a backward dataflow approach, processing blocks
+ * in reverse post-order and maintaining register maps at block boundaries.
+ * It handles complex cases like:
+ * - Phi nodes with register constraints
+ * - Function calls with argument/return register management
+ * - Parallel moves and cycle detection
+ * - Register hints and optimizations
+ * 
+ * The function generates the necessary move instructions to maintain
+ * correct register assignments across the control flow graph.
+ * 
+ * @param fn The function to allocate registers for
  */
 void
 rega(Fn *fn)

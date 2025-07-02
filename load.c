@@ -42,6 +42,16 @@ static uint inum;    /* current insertion number */
 static Insert *ilog; /* global insertion log */
 static uint nlog;    /* number of entries in the log */
 
+/**
+ * Determines the size in bytes of a load instruction.
+ * 
+ * Returns the number of bytes that a load instruction reads from memory.
+ * This is used during load optimization to determine the size of memory
+ * accesses and to create appropriate masking operations.
+ * 
+ * @param l The load instruction to analyze
+ * @return Size in bytes of the load operation
+ */
 int
 loadsz(Ins *l)
 {
@@ -54,6 +64,16 @@ loadsz(Ins *l)
 	die("unreachable");
 }
 
+/**
+ * Determines the size in bytes of a store instruction.
+ * 
+ * Returns the number of bytes that a store instruction writes to memory.
+ * This is used during load optimization to determine the size of memory
+ * accesses and to check for potential conflicts between loads and stores.
+ * 
+ * @param s The store instruction to analyze
+ * @return Size in bytes of the store operation
+ */
 int
 storesz(Ins *s)
 {
@@ -66,6 +86,21 @@ storesz(Ins *s)
 	die("unreachable");
 }
 
+/**
+ * Inserts a new instruction into the insertion log.
+ * 
+ * This function creates a new instruction and logs it in the global
+ * insertion log for later application. It's used during load optimization
+ * to track instructions that need to be inserted to replace or optimize
+ * load operations.
+ * 
+ * @param cls The class of the instruction
+ * @param op The operation code
+ * @param a0 First argument
+ * @param a1 Second argument
+ * @param l Location where the instruction should be inserted
+ * @return Reference to the destination temporary of the new instruction
+ */
 static Ref
 iins(int cls, int op, Ref a0, Ref a1, Loc *l)
 {
@@ -81,6 +116,17 @@ iins(int cls, int op, Ref a0, Ref a1, Loc *l)
 	return ist->new.ins.to = newtmp("ld", cls, curf);
 }
 
+/**
+ * Performs type casting on a reference if necessary.
+ * 
+ * This function ensures that a reference has the correct class by
+ * inserting cast instructions when needed. It handles both widening
+ * and narrowing conversions between different data types.
+ * 
+ * @param r Pointer to the reference to cast
+ * @param cls The target class
+ * @param l Location where cast instructions should be inserted
+ */
 static void
 cast(Ref *r, int cls, Loc *l)
 {
@@ -106,6 +152,18 @@ cast(Ref *r, int cls, Loc *l)
 	}
 }
 
+/**
+ * Applies a bit mask to a reference.
+ * 
+ * This function casts a reference to the specified class and then
+ * applies a bit mask using a bitwise AND operation. It's used during
+ * load optimization to extract specific bits from loaded values.
+ * 
+ * @param cls The class for the operation
+ * @param r Pointer to the reference to mask
+ * @param msk The bit mask to apply
+ * @param l Location where instructions should be inserted
+ */
 static inline void
 mask(int cls, Ref *r, bits msk, Loc *l)
 {
@@ -113,6 +171,19 @@ mask(int cls, Ref *r, bits msk, Loc *l)
 	*r = iins(cls, Oand, *r, getcon(msk, curf), l);
 }
 
+/**
+ * Generates a load instruction for a memory slice.
+ * 
+ * This function creates a load instruction to read a specific slice
+ * of memory. It handles alias analysis to determine the correct base
+ * address and offset, and applies masking if the full slice is not
+ * being loaded.
+ * 
+ * @param sl The memory slice to load
+ * @param msk Bit mask indicating which bits to preserve
+ * @param l Location where the load should be inserted
+ * @return Reference to the loaded value
+ */
 static Ref
 load(Slice sl, bits msk, Loc *l)
 {
@@ -166,6 +237,17 @@ load(Slice sl, bits msk, Loc *l)
 	return r;
 }
 
+/**
+ * Checks if a reference kills (overwrites) a memory slice.
+ * 
+ * This function determines if a reference (typically a store instruction)
+ * overwrites the memory location described by a slice. It uses alias
+ * analysis to check for potential conflicts between memory accesses.
+ * 
+ * @param r The reference to check
+ * @param sl The memory slice to check against
+ * @return 1 if r kills sl, 0 otherwise
+ */
 static int
 killsl(Ref r, Slice sl)
 {
@@ -191,6 +273,23 @@ killsl(Ref r, Slice sl)
  * mask does not cover all the bits of the slice,
  * otherwise, it has class sl.cls
  * the procedure returns R when it fails */
+/**
+ * Computes the definition of a memory slice at a specific point.
+ * 
+ * This function determines what value a memory slice contains at a given
+ * point in the program. It analyzes the control flow to find the most
+ * recent definition of the slice, which could be a store instruction,
+ * a phi node, or a load from a different location. The function returns
+ * a reference to the computed value or R if the definition cannot be
+ * determined.
+ * 
+ * @param sl The memory slice to analyze
+ * @param msk Bit mask for the slice
+ * @param b The block where the analysis is performed
+ * @param i The instruction being analyzed
+ * @param il Location for inserting new instructions
+ * @return Reference to the slice's value, or R if not computable
+ */
 static Ref
 def(Slice sl, bits msk, Blk *b, Ins *i, Loc *il)
 {
@@ -387,6 +486,18 @@ def(Slice sl, bits msk, Blk *b, Ins *i, Loc *il)
 	return r;
 }
 
+/**
+ * Compares two insertion log entries for sorting.
+ * 
+ * This function is used as a comparison function for qsort to order
+ * insertion log entries. It sorts by block ID first, then puts phi
+ * nodes before regular instructions, then by instruction offset,
+ * and finally by insertion number.
+ * 
+ * @param pa Pointer to first insertion entry
+ * @param pb Pointer to second insertion entry
+ * @return Negative if a < b, 0 if equal, positive if a > b
+ */
 static int
 icmp(const void *pa, const void *pb)
 {
@@ -409,6 +520,22 @@ icmp(const void *pa, const void *pb)
 }
 
 /* require rpo ssa alias */
+/**
+ * Performs load optimization on a function.
+ * 
+ * This function implements load elimination and optimization by:
+ * - Analyzing each load instruction to find if its value can be
+ *   computed from previous stores or other loads
+ * - Replacing loads with computed values when possible
+ * - Inserting phi nodes to handle cases where different values
+ *   flow from different predecessors
+ * - Converting loads to copies or extensions when appropriate
+ * 
+ * The optimization requires reverse post-order numbering, SSA form,
+ * and alias analysis to be computed beforehand.
+ * 
+ * @param fn The function to optimize
+ */
 void
 loadopt(Fn *fn)
 {

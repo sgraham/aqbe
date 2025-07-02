@@ -1,5 +1,16 @@
 #include "all.h"
 
+/**
+ * Aggregates loop information at loop headers.
+ * 
+ * This function accumulates liveness and loop information from loop
+ * bodies to their headers. It merges the generated sets and updates
+ * the maximum live count for each register class. This information
+ * is used to make better spilling decisions in loops.
+ * 
+ * @param hd The loop header block
+ * @param b The loop body block
+ */
 static void
 aggreg(Blk *hd, Blk *b)
 {
@@ -13,6 +24,22 @@ aggreg(Blk *hd, Blk *b)
 			hd->nlive[k] = b->nlive[k];
 }
 
+/**
+ * Updates usage statistics for a reference.
+ * 
+ * This function recursively processes a reference to update usage
+ * statistics for temporaries. It handles memory references by
+ * processing their base and index registers, and updates the
+ * usage count, definition count, and cost for temporaries.
+ * 
+ * The cost is weighted by the loop level, making temporaries
+ * used in deeper loops more expensive to spill.
+ * 
+ * @param r The reference to process
+ * @param use Whether this is a use (1) or definition (0)
+ * @param loop The current loop level
+ * @param fn The function containing the reference
+ */
 static void
 tmpuse(Ref r, int use, int loop, Fn *fn)
 {
@@ -34,7 +61,22 @@ tmpuse(Ref r, int use, int loop, Fn *fn)
 
 /* evaluate spill costs of temporaries,
  * this also fills usage information
- * requires rpo, preds
+ * requires rpo, preds */
+/**
+ * Evaluates spill costs for all temporaries in a function.
+ * 
+ * This function computes the spill cost for each temporary based on
+ * its usage patterns and loop nesting. The cost is used to prioritize
+ * which temporaries to keep in registers when register pressure is high.
+ * 
+ * The function:
+ * 1. Aggregates loop information using loopiter()
+ * 2. Initializes cost and usage statistics for all temporaries
+ * 3. Processes phi nodes, instructions, and jump arguments
+ * 4. Weights costs by loop depth to prefer keeping temporaries
+ *    in registers in deeper loops
+ * 
+ * @param fn The function to analyze
  */
 void
 fillcost(Fn *fn)
@@ -102,6 +144,18 @@ static int slot4; /* next slot of 4 bytes */
 static int slot8; /* ditto, 8 bytes */
 static BSet mask[2][1]; /* class masks */
 
+/**
+ * Comparison function for sorting temporaries by spill cost.
+ * 
+ * This function compares two temporaries based on their spill cost,
+ * with higher costs (more expensive to spill) sorted first. This
+ * ensures that the most valuable temporaries are kept in registers
+ * when register pressure is high.
+ * 
+ * @param pa Pointer to first temporary index
+ * @param pb Pointer to second temporary index
+ * @return Negative if a has higher cost, positive if b does
+ */
 static int
 tcmp0(const void *pa, const void *pb)
 {
@@ -112,6 +166,18 @@ tcmp0(const void *pa, const void *pb)
 	return (cb < ca) ? -1 : (cb > ca);
 }
 
+/**
+ * Comparison function that prioritizes temporaries in a preferred set.
+ * 
+ * This function first compares temporaries based on whether they are
+ * in a preferred set (fst), then falls back to cost-based comparison.
+ * This allows the spiller to prioritize specific temporaries (like
+ * those with register hints) over others with similar costs.
+ * 
+ * @param pa Pointer to first temporary index
+ * @param pb Pointer to second temporary index
+ * @return Negative if a has higher priority, positive if b does
+ */
 static int
 tcmp1(const void *pa, const void *pb)
 {
@@ -121,6 +187,21 @@ tcmp1(const void *pa, const void *pb)
 	return c ? c : tcmp0(pa, pb);
 }
 
+/**
+ * Allocates a stack slot for a temporary.
+ * 
+ * This function manages stack slot allocation for spilled temporaries,
+ * implementing a sophisticated packing algorithm to minimize stack usage.
+ * It handles different slot sizes (4 and 8 bytes) and maintains
+ * alignment requirements.
+ * 
+ * The algorithm uses two slot counters (slot4 and slot8) to track
+ * available slots of different sizes, with logic to pack them efficiently
+ * and avoid fragmentation.
+ * 
+ * @param t The temporary to allocate a slot for
+ * @return Reference to the allocated stack slot
+ */
 static Ref
 slot(int t)
 {
@@ -159,7 +240,20 @@ slot(int t)
  * temporaries, preferring those
  * present in f (if given), then
  * those with the largest spill
- * cost
+ * cost */
+/**
+ * Limits a bit set to contain at most k temporaries.
+ * 
+ * This function restricts a bit set to hold at most k temporaries,
+ * preferring those in a given set (f) if provided, then those with
+ * the highest spill cost. It uses the comparison functions tcmp0
+ * and tcmp1 to sort temporaries by priority.
+ * 
+ * Temporaries that don't fit in the limit are spilled to stack slots.
+ * 
+ * @param b The bit set to limit
+ * @param k Maximum number of temporaries to keep
+ * @param f Optional preferred set of temporaries
  */
 static void
 limit(BSet *b, int k, BSet *f)
@@ -197,7 +291,20 @@ limit(BSet *b, int k, BSet *f)
  * target limits using the same
  * preferences as limit(); assumes
  * that k1 gprs and k2 fprs are
- * currently in use
+ * currently in use */
+
+/**
+ * Limits register usage for both integer and floating-point registers.
+ * 
+ * This function applies the limit() function separately to integer
+ * and floating-point temporaries, ensuring that each register class
+ * respects its own limits. It takes into account the current usage
+ * of each register class.
+ * 
+ * @param b1 Bit set containing all temporaries
+ * @param k1 Current number of integer registers in use
+ * @param k2 Current number of floating-point registers in use
+ * @param f Optional preferred set of temporaries
  */
 static void
 limit2(BSet *b1, int k1, int k2, BSet *f)
@@ -213,6 +320,17 @@ limit2(BSet *b1, int k1, int k2, BSet *f)
 	bsunion(b1, b2);
 }
 
+/**
+ * Sets register hints for temporaries in a bit set.
+ * 
+ * This function updates the register hints for all temporaries in
+ * a bit set, indicating that the specified registers are preferred
+ * for these temporaries. This helps guide future register allocation
+ * decisions.
+ * 
+ * @param u Bit set of temporaries to update
+ * @param r Bit mask of preferred registers
+ */
 static void
 sethint(BSet *u, bits r)
 {
@@ -223,7 +341,16 @@ sethint(BSet *u, bits r)
 }
 
 /* reloads temporaries in u that are
- * not in v from their slots
+ * not in v from their slots */
+/**
+ * Reloads temporaries from their spill slots.
+ * 
+ * This function generates load instructions for temporaries that are
+ * in a source set (u) but not in a destination set (v), effectively
+ * reloading them from their spill slots into registers.
+ * 
+ * @param u Bit set of temporaries that should be in registers
+ * @param v Bit set of temporaries currently in registers
  */
 static void
 reloads(BSet *u, BSet *v)
@@ -235,6 +362,16 @@ reloads(BSet *u, BSet *v)
 			emit(Oload, tmp[t].cls, TMP(t), slot(t), R);
 }
 
+/**
+ * Stores a temporary to its spill slot.
+ * 
+ * This function generates a store instruction to save a temporary
+ * to its allocated stack slot. It only generates the store if a
+ * valid slot is provided.
+ * 
+ * @param r Reference to the temporary to store
+ * @param s Stack slot number (-1 if no slot allocated)
+ */
 static void
 store(Ref r, int s)
 {
@@ -242,12 +379,35 @@ store(Ref r, int s)
 		emit(Ostorew + tmp[r.val].cls, 0, R, r, SLOT(s));
 }
 
+/**
+ * Checks if an instruction is a register-to-register copy.
+ * 
+ * This function determines if an instruction is a copy operation
+ * where the source is a register. Such instructions are handled
+ * specially during spilling.
+ * 
+ * @param i The instruction to check
+ * @return 1 if it's a register copy, 0 otherwise
+ */
 static int
 regcpy(Ins *i)
 {
 	return i->op == Ocopy && isreg(i->arg[0]);
 }
 
+/**
+ * Processes parallel moves at the beginning of a block.
+ * 
+ * This function handles a sequence of register-to-register copy
+ * instructions at the start of a block, managing register pressure
+ * and generating spill/reload instructions as needed. It also
+ * handles function calls by managing caller-saved registers.
+ * 
+ * @param b The block containing the moves
+ * @param i Pointer to the first instruction to process
+ * @param v Bit set of temporaries currently in registers
+ * @return Pointer to the instruction after the processed moves
+ */
 static Ins *
 dopm(Blk *b, Ins *i, BSet *v)
 {
@@ -297,6 +457,20 @@ dopm(Blk *b, Ins *i, BSet *v)
 	return i;
 }
 
+/**
+ * Merges liveness information from two blocks.
+ * 
+ * This function combines liveness information from two blocks,
+ * taking into account loop nesting. For blocks in the same loop
+ * level, it performs a union operation. For blocks in different
+ * loop levels, it only includes temporaries that haven't been
+ * spilled yet.
+ * 
+ * @param u Bit set to store the merged result
+ * @param bu First block
+ * @param v Bit set from second block
+ * @param bv Second block
+ */
 static void
 merge(BSet *u, Blk *bu, BSet *v, Blk *bv)
 {
@@ -320,7 +494,27 @@ merge(BSet *u, Blk *bu, BSet *v, Blk *bv)
  *
  * Be careful with:
  * - Ocopy instructions to ensure register
- *   constraints
+ *   constraints */
+/**
+ * Performs register spilling for an entire function.
+ * 
+ * This function implements a complete spilling pass that:
+ * 1. Determines which temporaries must be in registers at block boundaries
+ * 2. Processes instructions to maintain register pressure within limits
+ * 3. Generates spill and reload instructions as needed
+ * 4. Handles special cases like function calls and phi nodes
+ * 
+ * The algorithm works backwards through the control flow graph,
+ * maintaining register maps at block boundaries and ensuring that
+ * register pressure never exceeds the target limits.
+ * 
+ * The function handles complex cases including:
+ * - Loop back-edges with special register preservation
+ * - Function calls with argument/return register management
+ * - Phi nodes with register constraints
+ * - Memory operations requiring register operands
+ * 
+ * @param fn The function to spill
  */
 void
 spill(Fn *fn)
